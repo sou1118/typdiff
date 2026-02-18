@@ -61,21 +61,17 @@ Compile the output with `typst compile` to get a PDF with visual diff markup.
 
 ## Installation
 
-### From source
+### From crates.io
+
+```sh
+cargo install typdiff
+```
+
+### From source (latest development version)
 
 ```sh
 cargo install --git https://github.com/sou1118/typdiff
 ```
-
-### Build locally
-
-```sh
-git clone https://github.com/sou1118/typdiff
-cd typdiff
-cargo build --release
-```
-
-The binary will be at `target/release/typdiff`.
 
 ## Usage
 
