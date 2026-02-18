@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ci:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Format
+            command: cargo fmt --check
+            components: rustfmt
+            cache: false
+          - name: Clippy
+            command: cargo clippy -- -D warnings
+            components: clippy
+            cache: true
+          - name: Test
+            command: cargo test
+            components: ""
+            cache: true
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7
+        with:
+          components: ${{ matrix.components }}
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+        if: ${{ matrix.cache }}
+      - run: ${{ matrix.command }}
+
+  compile-test:
+    name: Compile Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: typst-community/setup-typst@48aeee7543d37f01afd1ffb27307dc277387ba13 # v4.3.1
+      - name: Build typdiff
+        run: cargo build
+      - name: Diff and compile (basic fixtures)
+        run: |
+          cargo run -- tests/fixtures/old.typ tests/fixtures/new.typ -o /tmp/diff-basic.typ
+          typst compile /tmp/diff-basic.typ /tmp/diff-basic.pdf
+      - name: Diff and compile (rich fixtures)
+        run: |
+          cargo run -- tests/fixtures/rich-old.typ tests/fixtures/rich-new.typ -o /tmp/diff-rich.typ
+          typst compile /tmp/diff-rich.typ /tmp/diff-rich.pdf

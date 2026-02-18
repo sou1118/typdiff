@@ -1,0 +1,124 @@
+use typdiff::diff::diff;
+use typdiff::parse::parse;
+use typdiff::render::render;
+
+fn run_diff(old: &str, new: &str) -> String {
+    let old_blocks: Vec<_> = parse(old)
+        .into_iter()
+        .filter(|b| !matches!(b, typdiff::Block::Parbreak))
+        .collect();
+    let new_blocks: Vec<_> = parse(new)
+        .into_iter()
+        .filter(|b| !matches!(b, typdiff::Block::Parbreak))
+        .collect();
+    let results = diff(&old_blocks, &new_blocks);
+    render(&results)
+}
+
+#[test]
+fn test_identical_documents() {
+    let src = "= Title\n\nHello world.\n";
+    let output = run_diff(src, src);
+    assert!(output.contains("= Title"));
+    assert!(output.contains("Hello world."));
+    // The preamble defines diff-added/diff-deleted, but the body should not use them.
+    assert!(!output.contains("#diff-added["));
+    assert!(!output.contains("#diff-deleted["));
+}
+
+#[test]
+fn test_heading_change() {
+    let old = "= Introduction\n\nSome text.\n";
+    let new = "= Background\n\nSome text.\n";
+    let output = run_diff(old, new);
+    assert!(output.contains("diff-deleted"));
+    assert!(output.contains("diff-added"));
+    assert!(output.contains("Some text."));
+}
+
+#[test]
+fn test_paragraph_word_change() {
+    let old = "= Title\n\nThis is the old text.\n";
+    let new = "= Title\n\nThis is the new text.\n";
+    let output = run_diff(old, new);
+    // Title should be unchanged.
+    assert!(output.contains("= Title"));
+    // "old" should be deleted, "new" should be added.
+    assert!(output.contains("#diff-deleted[old]"));
+    assert!(output.contains("#diff-added[new]"));
+}
+
+#[test]
+fn test_added_paragraph() {
+    let old = "= Title\n";
+    let new = "= Title\n\nNew paragraph here.\n";
+    let output = run_diff(old, new);
+    assert!(output.contains("diff-added"));
+}
+
+#[test]
+fn test_deleted_paragraph() {
+    let old = "= Title\n\nOld paragraph here.\n";
+    let new = "= Title\n";
+    let output = run_diff(old, new);
+    assert!(output.contains("diff-deleted"));
+}
+
+#[test]
+fn test_list_items() {
+    let old = "- Apple\n- Banana\n";
+    let new = "- Apple\n- Cherry\n";
+    let output = run_diff(old, new);
+    assert!(output.contains("Apple"));
+    // Banana should be marked as deleted or modified, Cherry as added.
+    assert!(output.contains("diff-deleted") || output.contains("diff-added"));
+}
+
+#[test]
+fn test_empty_to_content() {
+    let old = "";
+    let new = "= New Document\n\nContent here.\n";
+    let output = run_diff(old, new);
+    assert!(output.contains("diff-added"));
+}
+
+#[test]
+fn test_content_to_empty() {
+    let old = "= Old Document\n\nContent here.\n";
+    let new = "";
+    let output = run_diff(old, new);
+    assert!(output.contains("diff-deleted"));
+}
+
+#[test]
+fn test_output_contains_preamble() {
+    let output = run_diff("Hello\n", "World\n");
+    assert!(output.contains("#let diff-added(body)"));
+    assert!(output.contains("#let diff-deleted(body)"));
+    assert!(output.contains("underline"));
+    assert!(output.contains("strike"));
+}
+
+#[test]
+fn test_multiline_paragraph_change() {
+    let old = "First line and second part.\n";
+    let new = "First line and third part.\n";
+    let output = run_diff(old, new);
+    assert!(output.contains("#diff-deleted[second]"));
+    assert!(output.contains("#diff-added[third]"));
+}
+
+#[test]
+fn test_inline_footnote_ref_to_funccall() {
+    // When @ref changes to #footnote[...] in a long paragraph, it should produce
+    // Modified with word-level diff. The paragraph must be long enough for
+    // the similarity ratio to exceed 0.5.
+    let old = "This is a fairly long paragraph that discusses various topics in some detail. The key finding was reported by Smith et al. in their landmark study @smith_2024. Further research is needed to confirm these results across different settings and conditions.\n\nAnother paragraph.\n";
+    let new = "This is a fairly long paragraph that discusses various topics in some detail. The key finding was reported by Smith et al. in their landmark study #footnote[https://example.com/papers/smith2024.pdf accessed: 2025/01/15]. Further research is needed to confirm these results across different settings and conditions.\n\nAnother paragraph.\n";
+    let output = run_diff(old, new);
+    // The surrounding text should be inline with diff spans (Modified), not whole-block Delete+Add
+    assert!(
+        output.contains("study #diff-deleted["),
+        "surrounding text should be inline with diff spans: {output}"
+    );
+}

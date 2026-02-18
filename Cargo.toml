@@ -1,0 +1,22 @@
+[package]
+name = "typdiff"
+version = "0.1.0"
+authors = ["@sou1118"]
+edition = "2024"
+description = "A diff tool for Typst documents, similar to latexdiff"
+repository = "https://github.com/sou1118/typdiff"
+license = "Apache-2.0"
+readme = "README.md"
+
+[[bin]]
+name = "typdiff"
+path = "src/main.rs"
+
+[dependencies]
+typst-syntax = "0.14"
+similar = "2"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+
+[dev-dependencies]
+pretty_assertions = "1"
