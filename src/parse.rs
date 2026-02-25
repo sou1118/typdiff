@@ -201,4 +201,25 @@ mod tests {
             panic!("expected paragraph, got: {:?}", blocks[0]);
         }
     }
+
+    #[test]
+    fn test_parse_markup_reference_split() {
+        let text = "#[@foo]が段落の先頭にある場合、改行が挿入されないことを確認するテストです。\n";
+        let blocks = parse(text);
+        assert_eq!(blocks.len(), 1, "expected single paragraph block");
+        if let Block::Paragraph { source_text } = &blocks[0] {
+            assert!(source_text.starts_with("#[@foo]"));
+        }
+    }
+
+    #[test]
+    fn test_parse_contentblock_various_positions() {
+        for &case in &["#[foo]\n", "prefix #[foo] suffix\n", "#[foo]#[bar]\n"] {
+            let blocks = parse(case);
+            assert_eq!(blocks.len(), 1);
+            if let Block::Paragraph { source_text } = &blocks[0] {
+                assert!(source_text.contains("#[foo]"));
+            }
+        }
+    }
 }
