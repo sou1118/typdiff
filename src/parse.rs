@@ -70,7 +70,8 @@ pub fn parse(source: &str) -> Vec<Block> {
             | Expr::Emph(_)
             | Expr::Link(_)
             | Expr::Label(_)
-            | Expr::Ref(_) => {
+            | Expr::Ref(_)
+            | Expr::ContentBlock(_) => {
                 paragraph_buf.push_str(&node_text(&expr));
             }
             // inline raw
