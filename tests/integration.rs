@@ -122,3 +122,17 @@ fn test_inline_footnote_ref_to_funccall() {
         "surrounding text should be inline with diff spans: {output}"
     );
 }
+
+#[test]
+fn test_markup_reference_paragraph() {
+    let old = std::fs::read_to_string("tests/fixtures/markup-ref-start-old.typ").unwrap();
+    let new = std::fs::read_to_string("tests/fixtures/markup-ref-start-new.typ").unwrap();
+    let output = run_diff(&old, &new);
+
+    // the diff should remain a single paragraph with no blank line inserted.
+    assert!(
+        !output.contains("#[@foo]\n\n"),
+        "unexpected blank line: {output}"
+    );
+    assert!(output.contains("#[@foo]のような"));
+}
