@@ -1,6 +1,6 @@
 use similar::{Algorithm, ChangeTag, DiffOp, TextDiff};
 
-use crate::{Block, DiffResult, DiffSpan, SpanTag};
+use crate::{Block, DiffResult, DiffSpan, SpanTag, TypstLabel};
 
 /// Diff two sequences of blocks, returning a list of diff results.
 ///
@@ -136,8 +136,9 @@ fn process_replace(old_range: &[Block], new_range: &[Block], results: &mut Vec<D
 /// everything else (CJK characters, punctuation, whitespace) becomes an
 /// individual single-character token.
 ///
-/// Typst code expressions (`#func[...]`, `#func(...)`) and references (`@label`)
-/// are treated as atomic tokens so the diff never fragments valid Typst syntax.
+/// Typst code expressions (`#func[...]`, `#func(...)`), references (`@label`),
+/// and labels (`<label>`) are treated as atomic tokens so the diff never
+/// fragments valid Typst syntax.
 ///
 /// This gives word-level granularity for Latin text while allowing
 /// character-level precision for CJK text (which has no whitespace boundaries).
@@ -190,6 +191,14 @@ fn tokenize_mixed(s: &str) -> Vec<&str> {
                 } else {
                     break;
                 }
+            }
+            tokens.push(&s[start..i]);
+        } else if c == '<' {
+            let start = i;
+            if let Some(end) = TypstLabel::end(&s[start..]) {
+                i += end;
+            } else {
+                i += c_len;
             }
             tokens.push(&s[start..i]);
         } else if c.is_ascii_alphanumeric() {
@@ -526,6 +535,12 @@ mod tests {
             tokens.contains(&"@my_ref_2024"),
             "expected atomic @ref token, got: {tokens:?}"
         );
+    }
+
+    #[test]
+    fn test_tokenize_typst_label_atomic() {
+        let tokens = tokenize_mixed("<sample-widget_anchor>");
+        assert_eq!(tokens, vec!["<sample-widget_anchor>"]);
     }
 
     #[test]

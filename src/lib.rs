@@ -2,6 +2,25 @@ pub mod diff;
 pub mod parse;
 pub mod render;
 
+pub(crate) struct TypstLabel;
+
+impl TypstLabel {
+    pub(crate) fn end(text: &str) -> Option<usize> {
+        if !text.starts_with('<') {
+            return None;
+        }
+
+        let end = text[1..].find('>')?;
+        let id = &text[1..(1 + end)];
+        typst_syntax::is_valid_label_literal_id(id).then_some(end + 2)
+    }
+
+    pub(crate) fn is_only(text: &str) -> bool {
+        let trimmed = text.trim();
+        Self::end(trimmed).is_some_and(|end| end == trimmed.len())
+    }
+}
+
 /// A block-level element extracted from a Typst document.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Block {
@@ -90,6 +109,9 @@ impl Block {
     /// Returns true if this block should be treated as atomic (no word-level diff).
     pub fn is_atomic(&self) -> bool {
         matches!(
+            self,
+            Block::Paragraph { source_text } if TypstLabel::is_only(source_text)
+        ) || matches!(
             self,
             Block::RawBlock { .. }
                 | Block::Equation { .. }

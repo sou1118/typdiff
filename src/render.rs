@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use crate::{Block, BlockKind, DiffResult, DiffSpan, SpanTag};
+use crate::{Block, BlockKind, DiffResult, DiffSpan, SpanTag, TypstLabel};
 
 const PREAMBLE: &str = r##"#let diff-added(body) = {
   set text(fill: rgb("#0000ff"))
@@ -92,8 +92,7 @@ fn render_block(block: &Block, out: &mut String) {
 
 /// Returns true if the text consists only of a Typst label `<...>`.
 fn is_label_only(text: &str) -> bool {
-    let t = text.trim();
-    t.starts_with('<') && t.ends_with('>') && !t[1..t.len() - 1].contains('<')
+    TypstLabel::is_only(text)
 }
 
 /// Render a block wrapped in #diff-added[...] or #diff-deleted[...].
@@ -199,10 +198,19 @@ fn render_spans(spans: &[DiffSpan], out: &mut String) {
                 prev_was_diff = false;
             }
             SpanTag::Deleted => {
+                if is_label_only(&span.text) {
+                    prev_was_diff = false;
+                    continue;
+                }
                 write!(out, "#diff-deleted[{}]", escape_content(&span.text, true)).unwrap();
                 prev_was_diff = true;
             }
             SpanTag::Inserted => {
+                if is_label_only(&span.text) {
+                    out.push_str(&span.text);
+                    prev_was_diff = false;
+                    continue;
+                }
                 write!(out, "#diff-added[{}]", escape_content(&span.text, false)).unwrap();
                 prev_was_diff = true;
             }
@@ -396,5 +404,26 @@ mod tests {
         }];
         let output = render(&results);
         assert!(output.contains("Hello #diff-deleted[world]#diff-added[there]"));
+    }
+
+    #[test]
+    fn test_render_modified_label_bare() {
+        let results = vec![DiffResult::Modified {
+            kind: BlockKind::Paragraph,
+            spans: vec![
+                DiffSpan {
+                    tag: SpanTag::Deleted,
+                    text: "<old-label>".into(),
+                },
+                DiffSpan {
+                    tag: SpanTag::Inserted,
+                    text: "<new-label>".into(),
+                },
+            ],
+        }];
+        let output = render(&results);
+        assert!(output.contains("<new-label>"));
+        assert!(!output.contains("#diff-added[<new-label>]"));
+        assert!(!output.contains("#diff-deleted[\\<old-label>]"));
     }
 }

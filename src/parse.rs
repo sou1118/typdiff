@@ -58,6 +58,12 @@ pub fn parse(source: &str) -> Vec<Block> {
                     content: node_text(&expr),
                 });
             }
+            Expr::Label(_) if paragraph_buf.trim().is_empty() => {
+                flush_paragraph(&mut paragraph_buf, &mut blocks);
+                blocks.push(Block::Paragraph {
+                    source_text: node_text(&expr),
+                });
+            }
 
             // ---- inline elements (accumulate into paragraph) ----
             Expr::Text(_)
@@ -222,5 +228,17 @@ mod tests {
                 assert!(source_text.contains("#[foo]"));
             }
         }
+    }
+
+    #[test]
+    fn test_parse_label_at_paragraph_start_as_own_block() {
+        let blocks = parse("= Sample\n\n<sample-anchor>\nAlpha beta.\n");
+        assert!(matches!(&blocks[0], Block::Heading { .. }));
+        assert!(blocks.iter().any(
+            |b| matches!(b, Block::Paragraph { source_text } if source_text == "<sample-anchor>")
+        ));
+        assert!(blocks.iter().any(
+            |b| matches!(b, Block::Paragraph { source_text } if source_text == "Alpha beta.")
+        ));
     }
 }
