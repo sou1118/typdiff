@@ -199,7 +199,8 @@ fn render_spans(spans: &[DiffSpan], out: &mut String) {
             }
             SpanTag::Deleted => {
                 if is_label_only(&span.text) {
-                    prev_was_diff = false;
+                    // Nothing is emitted, so keep `prev_was_diff` tied to the
+                    // last actual output.
                     continue;
                 }
                 write!(out, "#diff-deleted[{}]", escape_content(&span.text, true)).unwrap();
@@ -243,11 +244,12 @@ fn write_enum_prefix(number: Option<usize>, out: &mut String) {
 /// - When `escape_refs` is true, `@` is escaped as `\@` and `<` is escaped
 ///   as `\<` to suppress reference resolution and label creation (used for
 ///   deleted content where the referenced label may no longer exist or would
-///   create duplicates).
+///   create duplicates). Label literals inside `#ref(<label>, ...)` are left
+///   unchanged because they are code arguments rather than content labels.
 fn escape_content(s: &str, escape_refs: bool) -> String {
     let mut result = String::with_capacity(s.len());
     let mut depth: i32 = 0;
-    for ch in s.chars() {
+    for (i, ch) in s.char_indices() {
         match ch {
             '[' => {
                 depth += 1;
@@ -266,7 +268,9 @@ fn escape_content(s: &str, escape_refs: bool) -> String {
                 result.push('\\');
                 result.push('@');
             }
-            '<' if escape_refs => {
+            // Bare deleted labels are escaped so they do not create anchors.
+            // In `#ref(<label>, ...)`, though, the label is code and must stay bare.
+            '<' if escape_refs && !is_ref_label_arg(s, i) => {
                 result.push('\\');
                 result.push('<');
             }
@@ -281,6 +285,17 @@ fn escape_content(s: &str, escape_refs: bool) -> String {
         result.push(' ');
     }
     result
+}
+
+/// True when `label_start` points at the `<` in the first argument to `#ref(...)`.
+fn is_ref_label_arg(s: &str, label_start: usize) -> bool {
+    // First require a real Typst label literal. Then look left: the first
+    // argument is preceded by `(`, and the call before that must be `#ref`.
+    TypstLabel::end(&s[label_start..]).is_some()
+        && s[..label_start]
+            .trim_end()
+            .strip_suffix('(')
+            .is_some_and(|prefix| prefix.trim_end().ends_with("#ref"))
 }
 
 #[cfg(test)]
@@ -325,6 +340,14 @@ mod tests {
     #[test]
     fn test_escape_content_labels_escaped_when_requested() {
         assert_eq!(escape_content("text <my-label>", true), "text \\<my-label>");
+    }
+
+    #[test]
+    fn test_escape_content_ref_call_label_not_escaped_when_requested() {
+        assert_eq!(
+            escape_content("compare #ref(<tbl-cobalt-notes>, supplement: [])", true),
+            "compare #ref(<tbl-cobalt-notes>, supplement: [])"
+        );
     }
 
     #[test]
@@ -425,5 +448,28 @@ mod tests {
         assert!(output.contains("<new-label>"));
         assert!(!output.contains("#diff-added[<new-label>]"));
         assert!(!output.contains("#diff-deleted[\\<old-label>]"));
+    }
+
+    #[test]
+    fn test_render_skipped_deleted_label_keeps_diff_call_guard() {
+        let results = vec![DiffResult::Modified {
+            kind: BlockKind::Paragraph,
+            spans: vec![
+                DiffSpan {
+                    tag: SpanTag::Deleted,
+                    text: "old".into(),
+                },
+                DiffSpan {
+                    tag: SpanTag::Deleted,
+                    text: "<old-label>".into(),
+                },
+                DiffSpan {
+                    tag: SpanTag::Equal,
+                    text: "(next)".into(),
+                },
+            ],
+        }];
+        let output = render(&results);
+        assert!(output.contains("#diff-deleted[old]\u{200B}(next)"));
     }
 }
