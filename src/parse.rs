@@ -60,8 +60,18 @@ pub fn parse(source: &str) -> Vec<Block> {
             }
 
             // ---- inline elements (accumulate into paragraph) ----
+            Expr::Space(_) => {
+                let text = node_text(&expr);
+                // Two consecutive Space("\n") nodes arise only when a LineComment
+                // was dropped between them (bare \n\n is always a Parbreak token,
+                // never two Space nodes). Skip the second \n to avoid producing
+                // \n\n in the reconstructed source, which Typst would treat as a
+                // paragraph break.
+                if !(text == "\n" && paragraph_buf.ends_with('\n')) {
+                    paragraph_buf.push_str(&text);
+                }
+            }
             Expr::Text(_)
-            | Expr::Space(_)
             | Expr::Linebreak(_)
             | Expr::Escape(_)
             | Expr::Shorthand(_)
