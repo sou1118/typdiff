@@ -68,12 +68,28 @@ pub fn parse(source: &str) -> Vec<Block> {
             // ---- inline elements (accumulate into paragraph) ----
             Expr::Space(_) => {
                 let text = node_text(&expr);
-                // Two consecutive Space("\n") nodes arise only when a LineComment
-                // was dropped between them (bare \n\n is always a Parbreak token,
-                // never two Space nodes). Skip the second \n to avoid producing
-                // \n\n in the reconstructed source, which Typst would treat as a
-                // paragraph break.
-                if !(text == "\n" && paragraph_buf.ends_with('\n')) {
+                // Two consecutive Space nodes spanning a newline arise only when
+                // a comment was dropped between them (bare \n\n is always a
+                // Parbreak token, never two Space nodes). Reconstructing them
+                // verbatim would leave a blank or whitespace-only line, which
+                // Typst treats as a paragraph break. Drop the buffer's trailing
+                // indent and the duplicate newline so the two lines stay in one
+                // paragraph. The buffer may end in \n plus indent when the
+                // dropped comment was itself indented.
+                let joined = match text.strip_prefix('\n') {
+                    Some(rest) => {
+                        let line_start = paragraph_buf.trim_end_matches([' ', '\t']);
+                        if line_start.ends_with('\n') {
+                            paragraph_buf.truncate(line_start.len());
+                            paragraph_buf.push_str(rest);
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    None => false,
+                };
+                if !joined {
                     paragraph_buf.push_str(&text);
                 }
             }
@@ -238,6 +254,49 @@ mod tests {
                 assert!(source_text.contains("#[foo]"));
             }
         }
+    }
+
+    #[test]
+    fn test_parse_line_comment_keeps_single_paragraph() {
+        let blocks = parse("First.\n// a comment\nSecond.\n");
+        assert_eq!(blocks.len(), 1, "expected 1 block, got: {blocks:?}");
+        assert!(
+            matches!(&blocks[0], Block::Paragraph { source_text } if source_text == "First.\nSecond.")
+        );
+    }
+
+    #[test]
+    fn test_parse_indented_line_comment_keeps_single_paragraph() {
+        let blocks = parse("First.\n  // indented comment\nSecond.\n");
+        assert_eq!(blocks.len(), 1, "expected 1 block, got: {blocks:?}");
+        assert!(
+            matches!(&blocks[0], Block::Paragraph { source_text } if source_text == "First.\nSecond.")
+        );
+    }
+
+    #[test]
+    fn test_parse_consecutive_indented_comments_keep_single_paragraph() {
+        let blocks = parse("First.\n  // c1\n  // c2\nSecond.\n");
+        assert_eq!(blocks.len(), 1, "expected 1 block, got: {blocks:?}");
+        assert!(
+            matches!(&blocks[0], Block::Paragraph { source_text } if source_text == "First.\nSecond.")
+        );
+    }
+
+    #[test]
+    fn test_parse_blank_line_before_comment_keeps_paragraph_break() {
+        let blocks = parse("First.\n\n// a comment\nSecond.\n");
+        assert!(
+            blocks
+                .iter()
+                .any(|b| matches!(b, Block::Paragraph { source_text } if source_text == "First."))
+        );
+        assert!(blocks.iter().any(|b| matches!(b, Block::Parbreak)));
+        assert!(
+            blocks
+                .iter()
+                .any(|b| matches!(b, Block::Paragraph { source_text } if source_text == "Second."))
+        );
     }
 
     #[test]
