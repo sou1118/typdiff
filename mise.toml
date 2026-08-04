@@ -1,2 +1,3 @@
 [tools]
-typst = "latest"
+rust = { version = "1.97.1", components = "rustfmt,clippy" }
+typst = "0.15.1"
