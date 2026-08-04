@@ -27,21 +27,18 @@ jobs:
         include:
           - name: Format
             command: cargo fmt --check
-            components: rustfmt
             cache: false
           - name: Clippy
             command: cargo clippy -- -D warnings
-            components: clippy
             cache: true
           - name: Test
             command: cargo test
-            components: ""
             cache: true
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7
+      - uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
         with:
-          components: ${{ matrix.components }}
+          install_args: rust
       - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
         if: ${{ matrix.cache }}
       - run: ${{ matrix.command }}
@@ -52,9 +49,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7
+      - uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
       - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
-      - uses: typst-community/setup-typst@48aeee7543d37f01afd1ffb27307dc277387ba13 # v4.3.1
       - name: Build typdiff
         run: cargo build
       - name: Diff and compile (basic fixtures)
