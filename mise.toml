@@ -1,3 +1,7 @@
 [tools]
 rust = { version = "1.97.1", components = "rustfmt,clippy" }
 typst = "0.15.1"
+actionlint = "1.7.12"
+zizmor = "1.28.0"
+# apps_v* release tag of the oxc monorepo; ships oxfmt 0.62.0
+"aqua:oxc-project/oxc/oxfmt" = "1.77.0"
