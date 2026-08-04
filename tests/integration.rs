@@ -136,3 +136,65 @@ fn test_markup_reference_paragraph() {
     );
     assert!(output.contains("#[@foo]のような"));
 }
+
+#[test]
+fn test_renamed_label_is_not_diffed_inside_label_syntax() {
+    let old = "= Sample\n\n<sample-widget-anchor>\n\nBody.\n";
+    let new = "= Sample\n\n<sample-widget_anchor>\n\nBody.\n";
+    let output = run_diff(old, new);
+
+    assert!(output.contains("<sample-widget_anchor>"));
+    assert!(!output.contains("<#diff-added"));
+    assert!(!output.contains("#diff-added[_]"));
+    assert!(!output.contains("#diff-deleted[-]"));
+}
+
+#[test]
+fn test_unchanged_label_stays_outside_added_paragraph() {
+    let old = r#"#set heading(numbering: "1.")
+
+See #ref(<sample-anchor>, supplement: [Section]).
+
+= Sample
+
+<sample-anchor>
+Alpha beta gamma delta epsilon zeta eta theta.
+"#;
+    let new = r#"#set heading(numbering: "1.")
+
+See #ref(<sample-anchor>, supplement: [Section]).
+
+= Sample
+
+<sample-anchor>
+Inserted paragraph before old text.
+
+Alpha beta gamma delta changed epsilon zeta eta theta.
+"#;
+    let output = run_diff(old, new);
+
+    assert!(output.contains("<sample-anchor>"));
+    assert!(output.contains("#diff-added[Inserted paragraph before old text.]"));
+    assert!(output.contains("Alpha beta gamma delta #diff-added[changed ]epsilon"));
+    assert!(!output.contains("#diff-added[<sample-anchor>"));
+    assert!(!output.contains("#diff-deleted[\\<sample-anchor>"));
+}
+
+#[test]
+fn test_replaced_footnote_ref_label_is_not_escaped_on_deleted_side() {
+    let old = r#"The bridge inspection memo kept its summary sentence for editors#footnote[
+Earlier notes pointed reviewers to #ref(<sec-bridge-ledger>, supplement: [])
+while the field log was being reconciled.
+]. The closing sentence stays fixed so the paragraph can align.
+"#;
+    let new = r#"The bridge inspection memo kept its summary sentence for editors#footnote[
+Current notes point reviewers to #ref(<sec-bridge-ledger>, supplement: [])
+after the field log was reconciled.
+]. The closing sentence stays fixed so the paragraph can align.
+"#;
+    let output = run_diff(old, new);
+
+    assert!(output.contains("#diff-deleted[#footnote["));
+    assert!(output.contains("#ref(<sec-bridge-ledger>, supplement: [])"));
+    assert!(!output.contains("#ref(\\<sec-bridge-ledger>"));
+}
