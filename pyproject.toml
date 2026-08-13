@@ -1,0 +1,33 @@
+[build-system]
+requires = ["maturin>=1.9,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "typdiff"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+]
+dynamic = ["version"]
+dependencies = []
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+description = "A diff tool for Typst documents, similar to latexdiff for LaTeX."
+readme = "README.md"
+
+[project.urls]
+Homepage = "https://github.com/sou1118/typdiff"
+Repository = "https://github.com/sou1118/typdiff"
+Readme = "https://github.com/sou1118/typdiff/blob/main/README.md"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+
+[tool.maturin]
+manifest-path = "bindings/python/Cargo.toml"
+module-name = "typdiff._typdiff"
+python-source = "bindings/python/python"
+features = ["pyo3/extension-module"]

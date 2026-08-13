@@ -1,11 +1,19 @@
+[workspace]
+members = ["bindings/python"]
+
+[workspace.package]
+version = "0.1.2"
+edition = "2024"
+license = "Apache-2.0"
+
 [package]
 name = "typdiff"
-version = "0.1.2"
+version.workspace = true
 authors = ["@sou1118"]
-edition = "2024"
+edition.workspace = true
 description = "A diff tool for Typst documents, similar to latexdiff"
 repository = "https://github.com/sou1118/typdiff"
-license = "Apache-2.0"
+license.workspace = true
 readme = "README.md"
 
 [[bin]]
