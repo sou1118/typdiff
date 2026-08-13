@@ -25,6 +25,14 @@ Readme = "https://github.com/sou1118/typdiff/blob/main/README.md"
 dev = [
     "pytest>=8",
 ]
+pdf = [
+    "typst>=0.13",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "pdf: exercises compiling typdiff output to PDF via the `typst` package (optional, requires the `pdf` dependency group)",
+]
 
 [tool.maturin]
 manifest-path = "bindings/python/Cargo.toml"

@@ -36,3 +36,13 @@ def test_diff_files_missing():
 def test_diff_invalid_utf8():
     with pytest.raises(ValueError):
         typdiff.diff(b"\xff\xfe", b"new")
+
+
+@pytest.mark.pdf
+def test_diff_compiles_to_pdf():
+    typst = pytest.importorskip("typst")
+
+    output = typdiff.diff_files(FIXTURES / "old.typ", FIXTURES / "new.typ")
+    pdf = typst.compile(output)
+
+    assert pdf.startswith(b"%PDF-")

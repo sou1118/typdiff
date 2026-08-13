@@ -119,6 +119,17 @@ diff = typdiff.diff_files("old.typ", "new.typ")  # from file paths (str or Path)
 
 `diff()` takes and returns `bytes`, matching how [`typst`](https://pypi.org/project/typst/)'s `compile()` treats `bytes` as inline source (a plain `str` argument is instead treated as a path to read) — so `typdiff`'s output can be passed straight into `compile()`. `diff_files()` still takes file paths as `str`/`Path`, since those are paths rather than document content.
 
+### Producing a PDF
+
+Combine `typdiff` with `typst` (Python bindings for the Typst compiler, `pip install typst`) to go straight from two Typst files to a diff PDF, without shelling out to either CLI:
+
+```python
+import typdiff
+import typst
+
+pdf_bytes = typst.compile(typdiff.diff_files("old.typ", "new.typ"))
+```
+
 ## Features
 
 - **Block-level diffing** — Detects structural changes in headings, paragraphs, list items, enum items, and term list items
