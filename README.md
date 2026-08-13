@@ -98,6 +98,27 @@ typdiff old.typ new.typ -o diff.typ
 typdiff old.typ new.typ -o diff.typ && typst compile diff.typ
 ```
 
+## Python
+
+`typdiff` is also available as a Python package.
+
+### Installation
+
+```sh
+pip install typdiff
+```
+
+### Usage
+
+```python
+import typdiff
+
+diff = typdiff.diff(old_bytes, new_bytes)  # from bytes
+diff = typdiff.diff_files("old.typ", "new.typ")  # from file paths (str or Path)
+```
+
+`diff()` takes and returns `bytes`, matching how [`typst`](https://pypi.org/project/typst/)'s `compile()` treats `bytes` as inline source (a plain `str` argument is instead treated as a path to read) — so `typdiff`'s output can be passed straight into `compile()`. `diff_files()` still takes file paths as `str`/`Path`, since those are paths rather than document content.
+
 ## Features
 
 - **Block-level diffing** — Detects structural changes in headings, paragraphs, list items, enum items, and term list items
