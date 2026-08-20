@@ -1,4 +1,7 @@
-use typst_syntax::ast::{self, AstNode, Expr};
+use typst_syntax::{
+    ast::{self, AstNode, Expr},
+    is_newline,
+};
 
 use crate::Block;
 
@@ -74,12 +77,12 @@ pub fn parse(source: &str) -> Vec<Block> {
                 // verbatim would leave a blank or whitespace-only line, which
                 // Typst treats as a paragraph break. Drop the buffer's trailing
                 // indent and the duplicate newline so the two lines stay in one
-                // paragraph. The buffer may end in \n plus indent when the
-                // dropped comment was itself indented.
-                let joined = match text.strip_prefix('\n') {
+                // paragraph. The buffer may end in a newline plus indent when
+                // the dropped comment was itself indented.
+                let joined = match strip_newline_prefix(&text) {
                     Some(rest) => {
                         let line_start = paragraph_buf.trim_end_matches([' ', '\t']);
-                        if line_start.ends_with('\n') {
+                        if line_start.chars().next_back().is_some_and(is_newline) {
                             paragraph_buf.truncate(line_start.len());
                             paragraph_buf.push_str(rest);
                             true
@@ -153,6 +156,16 @@ fn node_text(expr: &Expr<'_>) -> String {
     } else {
         text
     }
+}
+
+/// Strip one Typst newline, treating CRLF as a single sequence.
+fn strip_newline_prefix(text: &str) -> Option<&str> {
+    let first = text.chars().next().filter(|&c| is_newline(c))?;
+    let mut len = first.len_utf8();
+    if first == '\r' && text[len..].starts_with('\n') {
+        len += '\n'.len_utf8();
+    }
+    Some(&text[len..])
 }
 
 /// Flush the paragraph buffer into blocks if non-empty.
@@ -272,6 +285,24 @@ mod tests {
         assert!(
             matches!(&blocks[0], Block::Paragraph { source_text } if source_text == "First.\nSecond.")
         );
+    }
+
+    #[test]
+    fn test_parse_indented_line_comment_with_each_newline_form() {
+        for newline in [
+            "\n", "\x0B", "\x0C", "\r", "\r\n", "\u{0085}", "\u{2028}", "\u{2029}",
+        ] {
+            let source = format!("First.{newline}  // indented comment{newline}Second.{newline}");
+            let blocks = parse(&source);
+            let expected = format!("First.{newline}Second.");
+            assert_eq!(
+                blocks,
+                vec![Block::Paragraph {
+                    source_text: expected,
+                }],
+                "newline: {newline:?}"
+            );
+        }
     }
 
     #[test]
