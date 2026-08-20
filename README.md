@@ -61,6 +61,14 @@ Compile the output with `typst compile` to get a PDF with visual diff markup.
 
 ## Installation
 
+### With mise (recommended)
+
+[mise](https://mise.jdx.dev/) installs the appropriate prebuilt binary for your platform and verifies GitHub Artifact Attestations when available.
+
+```sh
+mise use -g github:sou1118/typdiff
+```
+
 ### From crates.io
 
 ```sh
