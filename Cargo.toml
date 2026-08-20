@@ -1,6 +1,6 @@
 [package]
 name = "typdiff"
-version = "0.1.2"
+version = "0.1.3"
 authors = ["@sou1118"]
 edition = "2024"
 description = "A diff tool for Typst documents, similar to latexdiff"
