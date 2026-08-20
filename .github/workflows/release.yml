@@ -23,25 +23,16 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-latest
-            cross: false
           - target: aarch64-unknown-linux-gnu
-            runner: ubuntu-latest
-            cross: true
+            runner: ubuntu-24.04-arm
           - target: x86_64-apple-darwin
             runner: macos-latest
-            cross: false
           - target: aarch64-apple-darwin
             runner: macos-latest
-            cross: false
           - target: x86_64-pc-windows-msvc
             runner: windows-latest
-            cross: false
           - target: aarch64-pc-windows-msvc
             runner: windows-11-arm
-            cross: false
-          - target: riscv64gc-unknown-linux-gnu
-            runner: ubuntu-latest
-            cross: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -51,16 +42,8 @@ jobs:
           install_args: rust
           cache: false
       - name: Add build target
-        if: "!matrix.cross"
         run: rustup target add ${{ matrix.target }}
-      - name: Install cross
-        if: matrix.cross
-        run: cargo install cross --locked
-      - name: Build with cross
-        if: matrix.cross
-        run: cross build --release --target ${{ matrix.target }}
       - name: Build with cargo
-        if: "!matrix.cross"
         run: cargo build --release --target ${{ matrix.target }}
       - name: Archive (unix)
         if: runner.os != 'Windows'
