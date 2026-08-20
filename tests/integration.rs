@@ -198,3 +198,14 @@ after the field log was reconciled.
     assert!(output.contains("#ref(<sec-bridge-ledger>, supplement: [])"));
     assert!(!output.contains("#ref(\\<sec-bridge-ledger>"));
 }
+
+#[test]
+fn test_indented_line_comment_does_not_split_paragraph() {
+    let old = "First sentence.\n  // indented comment\nSecond sentence.\n";
+    let new = "First sentence.\n  // indented comment\nSecond sentence changed.\n";
+    let output = run_diff(old, new);
+
+    assert!(output.contains("First sentence.\nSecond sentence"));
+    // A whitespace-only line would be treated as a paragraph break by Typst.
+    assert!(!output.contains("\n  \n"));
+}
