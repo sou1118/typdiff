@@ -219,6 +219,24 @@ after the field log was reconciled.
 }
 
 #[test]
+fn test_existing_escaped_bracket_is_not_double_escaped() {
+    // `\]` is already literal. Escaping the backslash would hand the `]`
+    // back to Typst and close the `#diff-added[...]` block early.
+    let output = run_diff("Foo bar here.\n", "Foo \\] bar here.\n");
+    assert!(output.contains("#diff-added[\\] ]"), "{output}");
+    assert!(!output.contains("\\\\]"), "{output}");
+}
+
+#[test]
+fn test_existing_escaped_at_is_not_double_escaped_on_deleted_side() {
+    // The deleted side escapes `@`, so an existing `\@` must not become `\\@`,
+    // which would turn it back into a reference.
+    let output = run_diff("A \\@b c d.\n", "A x c d.\n");
+    assert!(output.contains("#diff-deleted[\\@b]"), "{output}");
+    assert!(!output.contains("\\\\@"), "{output}");
+}
+
+#[test]
 fn test_indented_line_comment_does_not_split_paragraph() {
     let old = "First sentence.\n  // indented comment\nSecond sentence.\n";
     let new = "First sentence.\n  // indented comment\nSecond sentence changed.\n";

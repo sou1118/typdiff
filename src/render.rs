@@ -239,6 +239,8 @@ fn write_enum_prefix(number: Option<usize>, out: &mut String) {
 ///
 /// - Tracks bracket depth so that balanced `[...]` pairs are left untouched.
 /// - Unbalanced `]` is escaped as `\]`.
+/// - Backslash escapes already in the source are passed through as-is, so an
+///   escaped character is not escaped a second time.
 /// - If the content ends with an odd number of backslashes, a trailing space is
 ///   appended to prevent the closing `]` from being interpreted as `\]`.
 /// - When `escape_refs` is true, `@` is escaped as `\@` and `<` is escaped
@@ -249,8 +251,17 @@ fn write_enum_prefix(number: Option<usize>, out: &mut String) {
 fn escape_content(s: &str, escape_refs: bool) -> String {
     let mut result = String::with_capacity(s.len());
     let mut depth: i32 = 0;
-    for (i, ch) in s.char_indices() {
+    let mut chars = s.char_indices();
+    while let Some((i, ch)) = chars.next() {
         match ch {
+            // An escape sequence is already literal; copy it through whole so
+            // the escaped character is not treated as markup below.
+            '\\' => {
+                result.push('\\');
+                if let Some((_, escaped)) = chars.next() {
+                    result.push(escaped);
+                }
+            }
             '[' => {
                 depth += 1;
                 result.push(ch);
@@ -315,6 +326,14 @@ mod tests {
     #[test]
     fn test_escape_content_unbalanced_bracket() {
         assert_eq!(escape_content("a ] b", false), "a \\] b");
+    }
+
+    #[test]
+    fn test_escape_content_preserves_existing_escapes() {
+        // `\]` is already literal; escaping the backslash would hand the `]`
+        // back to Typst and close the caller's content block early.
+        assert_eq!(escape_content("a \\] b", false), "a \\] b");
+        assert_eq!(escape_content("\\[x", false), "\\[x");
     }
 
     #[test]
