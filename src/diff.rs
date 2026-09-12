@@ -1,6 +1,6 @@
 use similar::{Algorithm, ChangeTag, DiffOp, TextDiff};
 
-use crate::{Block, DiffResult, DiffSpan, SpanTag, TypstLabel};
+use crate::{Block, DiffResult, DiffSpan, SpanTag, TypstLabel, TypstRaw};
 
 /// Diff two sequences of blocks, returning a list of diff results.
 ///
@@ -137,8 +137,8 @@ fn process_replace(old_range: &[Block], new_range: &[Block], results: &mut Vec<D
 /// individual single-character token.
 ///
 /// Typst code expressions (`#func[...]`, `#func(...)`), references (`@label`),
-/// and labels (`<label>`) are treated as atomic tokens so the diff never
-/// fragments valid Typst syntax.
+/// labels (`<label>`), raw text (`` `code` ``), and escape sequences are treated
+/// as atomic tokens so the diff never fragments valid Typst syntax.
 ///
 /// This gives word-level granularity for Latin text while allowing
 /// character-level precision for CJK text (which has no whitespace boundaries).
@@ -192,6 +192,24 @@ fn tokenize_mixed(s: &str) -> Vec<&str> {
                     break;
                 }
             }
+            tokens.push(&s[start..i]);
+        } else if c == '\\' {
+            // An escape sequence is one unit. Split in half, the backslash is
+            // left escaping the diff call written next to it, and the
+            // character it guarded becomes loose markup.
+            let start = i;
+            i += c_len;
+            if i < s.len() {
+                i += s[i..].chars().next().unwrap().len_utf8();
+            }
+            tokens.push(&s[start..i]);
+        } else if c == '`' {
+            // Raw text is literal, so it must never be split: a diff call
+            // written inside the backticks is printed as characters rather
+            // than run, and a backtick parted from its partner leaves the raw
+            // element unterminated.
+            let start = i;
+            i += TypstRaw::end(&s[i..]).unwrap_or(c_len);
             tokens.push(&s[start..i]);
         } else if c == '<' {
             let start = i;
