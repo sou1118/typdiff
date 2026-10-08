@@ -69,6 +69,12 @@ Compile the output with `typst compile` to get a PDF with visual diff markup.
 mise use -g github:sou1118/typdiff
 ```
 
+### Homebrew
+
+```sh
+brew install typdiff
+```
+
 ### From crates.io
 
 ```sh
