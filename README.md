@@ -63,7 +63,13 @@ Compile the output with `typst compile` to get a PDF with visual diff markup.
 
 ### With mise (recommended)
 
-[mise](https://mise.jdx.dev/) installs the appropriate prebuilt binary for your platform and verifies GitHub Artifact Attestations when available.
+[mise](https://mise.jdx.dev/) 2026.9.2 or later installs the appropriate prebuilt binary for your platform from the release's signed [packslip](https://packslip.dev/) manifest, verifying the signature and the archive's digest before unpacking it.
+
+```sh
+mise use -g packslip:github.com/sou1118/typdiff
+```
+
+Releases before v0.1.4 have no packslip manifest. To install one of them, or with an older mise, use the GitHub backend, which verifies GitHub Artifact Attestations when available:
 
 ```sh
 mise use -g github:sou1118/typdiff
