@@ -19,4 +19,4 @@ clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 
 [dev-dependencies]
-pretty_assertions = "1"
+pretty_assertions = "=1.4.1"
