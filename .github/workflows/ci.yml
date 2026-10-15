@@ -55,9 +55,9 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
-          install_args: actionlint zizmor aqua:oxc-project/oxc/oxfmt
-      - name: actionlint
-        run: actionlint
+          install_args: jactionlint zizmor aqua:oxc-project/oxc/oxfmt
+      - name: jactionlint
+        run: jactionlint
       - name: zizmor
         run: zizmor .github/workflows/
         env:

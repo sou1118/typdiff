@@ -1,0 +1,4 @@
+ignores:
+  - rule: superfluous-actions
+    file: .github/workflows/release.yml
+    reason: action-gh-release is kept for generate_release_notes and asset handling.
