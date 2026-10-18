@@ -68,7 +68,7 @@ jobs:
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: typdiff-${{ matrix.target }}.*
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: typdiff-${{ matrix.target }}
           path: typdiff-${{ matrix.target }}.*
@@ -96,7 +96,7 @@ jobs:
           # The build jobs already attest each archive
           attest: link
           upload: false
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: packslip
           path: ${{ steps.packslip.outputs.bundle }}
