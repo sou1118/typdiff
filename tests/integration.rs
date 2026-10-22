@@ -2,6 +2,11 @@ use typdiff::diff::diff;
 use typdiff::parse::parse;
 use typdiff::render::render;
 
+/// True when the rendered output is syntactically valid Typst.
+fn parses(rendered: &str) -> bool {
+    !typst_syntax::parse(rendered).erroneous()
+}
+
 fn run_diff(old: &str, new: &str) -> String {
     let old_blocks: Vec<_> = parse(old)
         .into_iter()
@@ -197,6 +202,83 @@ after the field log was reconciled.
     assert!(output.contains("#diff-deleted[#footnote["));
     assert!(output.contains("#ref(<sec-bridge-ledger>, supplement: [])"));
     assert!(!output.contains("#ref(\\<sec-bridge-ledger>"));
+}
+
+#[test]
+fn test_existing_backslash_escape_is_not_double_escaped() {
+    // `\*` and `\[` are already literal. Escaping the backslash instead would
+    // hand the `*`/`[` back to Typst as markup and reopen the delimiter.
+    let old = "Foo bar.\n";
+    let new = "Foo \\*baz* and \\[qux bar.\n";
+    let output = run_diff(old, new);
+
+    assert!(
+        !output.contains("\\\\*") && !output.contains("\\\\["),
+        "an existing escape must not be escaped a second time: {output}"
+    );
+}
+
+#[test]
+fn test_escape_sequence_is_not_split_across_a_diff_call() {
+    // The diff boundary would otherwise fall inside `\]`, stranding the
+    // backslash at the end of the unchanged text where it escapes the `#` of
+    // the call that follows, printing "#diff-deleted[...]" as plain text.
+    let old = "\\[x\\] [grp]\n";
+    let new = "\\[x\\]\n";
+    let output = run_diff(old, new);
+
+    assert!(
+        !output.contains("\\#diff-deleted"),
+        "a stranded backslash must not escape the call: {output}"
+    );
+    assert!(output.contains("\\[x\\]#diff-deleted["), "output: {output}");
+    assert!(parses(&output), "output must compile: {output}");
+}
+
+#[test]
+fn test_raw_span_is_replaced_whole() {
+    // A diff call written between the backticks is printed as characters
+    // rather than run, since raw text is literal.
+    let old = "Walk at `ttIdx` until the `last_tile` bit.\n";
+    let new = "Walk at `tpIdx` until the `last` bit.\n";
+    let output = run_diff(old, new);
+
+    assert!(
+        output.contains("#diff-deleted[`ttIdx`]#diff-added[`tpIdx`]"),
+        "the raw span should be wrapped whole: {output}"
+    );
+    assert!(
+        output.contains("#diff-deleted[`last_tile`]#diff-added[`last`]"),
+        "output: {output}"
+    );
+}
+
+#[test]
+fn test_raw_content_is_not_escaped() {
+    // Inside backticks a `]` does not close the caller's content block and a
+    // backslash is not an escape, so escaping there both is needless and puts
+    // stray characters on the page.
+    let old = "Use `a]b` and `*` here.\n";
+    let new = "Use `zzz` and `*` here.\n";
+    let output = run_diff(old, new);
+
+    assert!(output.contains("#diff-deleted[`a]b`]"), "output: {output}");
+    assert!(!output.contains("\\]b"), "output: {output}");
+    assert!(!output.contains("\\*"), "output: {output}");
+}
+
+#[test]
+fn test_escaped_backtick_does_not_open_raw_text() {
+    // `` \` `` is a literal backtick. Reading it as an opening delimiter shifts
+    // every raw boundary after it and splits the next real raw span.
+    let old = "a \\` b `code` c\n";
+    let new = "a \\` b `xxxx` d\n";
+    let output = run_diff(old, new);
+
+    assert!(
+        output.contains("#diff-deleted[`code`]#diff-added[`xxxx`]"),
+        "the raw span after an escaped backtick must stay intact: {output}"
+    );
 }
 
 #[test]
