@@ -1,6 +1,6 @@
 use typdiff::diff::diff;
 use typdiff::parse::parse;
-use typdiff::render::render;
+use typdiff::render::{render, render_body};
 
 fn run_diff(old: &str, new: &str) -> String {
     let old_blocks: Vec<_> = parse(old)
@@ -208,4 +208,16 @@ fn test_indented_line_comment_does_not_split_paragraph() {
     assert!(output.contains("First sentence.\nSecond sentence"));
     // A whitespace-only line would be treated as a paragraph break by Typst.
     assert!(!output.contains("\n  \n"));
+}
+
+#[test]
+fn test_render_body_omits_preamble() {
+    let old_blocks = parse("Old text.\n");
+    let new_blocks = parse("New text.\n");
+    let output = render_body(&diff(&old_blocks, &new_blocks));
+
+    // The caller imports its own definitions, which a preamble would shadow.
+    assert!(!output.contains("#let diff-added"));
+    assert!(!output.contains("#let diff-deleted"));
+    assert!(output.contains("#diff-added[New]"));
 }
