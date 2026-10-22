@@ -1,5 +1,5 @@
 [tools]
-rust = { version = "1.99.0", components = "rustfmt,clippy" }
+rust = { version = "1.99.1", components = "rustfmt,clippy" }
 typst = "0.15.1"
 jactionlint = "2.2.0"
 zizmor = "1.30.1"
