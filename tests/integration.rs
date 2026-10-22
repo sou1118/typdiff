@@ -200,6 +200,20 @@ after the field log was reconciled.
 }
 
 #[test]
+fn test_existing_backslash_escape_is_not_double_escaped() {
+    // `\*` and `\[` are already literal. Escaping the backslash instead would
+    // hand the `*`/`[` back to Typst as markup and reopen the delimiter.
+    let old = "Foo bar.\n";
+    let new = "Foo \\*baz* and \\[qux bar.\n";
+    let output = run_diff(old, new);
+
+    assert!(
+        !output.contains("\\\\*") && !output.contains("\\\\["),
+        "an existing escape must not be escaped a second time: {output}"
+    );
+}
+
+#[test]
 fn test_indented_line_comment_does_not_split_paragraph() {
     let old = "First sentence.\n  // indented comment\nSecond sentence.\n";
     let new = "First sentence.\n  // indented comment\nSecond sentence changed.\n";
