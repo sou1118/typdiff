@@ -209,3 +209,15 @@ fn test_indented_line_comment_does_not_split_paragraph() {
     // A whitespace-only line would be treated as a paragraph break by Typst.
     assert!(!output.contains("\n  \n"));
 }
+
+#[test]
+fn test_label_after_changed_equation_stays_on_equation() {
+    let old = "#set math.equation(numbering: \"(1)\")\n\n$ x = 1 $ <eq-main>\n\nSee @eq-main.\n";
+    let new = "#set math.equation(numbering: \"(1)\")\n\n$ x = 2 $ <eq-main>\n\nSee @eq-main.\n";
+    let output = run_diff(old, new);
+
+    // Outside the wrapper the label would attach to the styled wrapper, and
+    // `@eq-main` would fail with "cannot reference styled".
+    assert!(output.contains("#diff-added[$ x = 2 $ <eq-main>]"));
+    assert!(!output.contains("\n<eq-main>\n"));
+}
