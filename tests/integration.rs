@@ -209,3 +209,17 @@ fn test_indented_line_comment_does_not_split_paragraph() {
     // A whitespace-only line would be treated as a paragraph break by Typst.
     assert!(!output.contains("\n  \n"));
 }
+
+#[test]
+fn test_deleted_equation_stays_after_preceding_paragraph() {
+    let old = "The model is defined below.\n\n$ x = 1 $\n";
+    let new = "The model is defined here.\n";
+    let output = run_diff(old, new);
+
+    let paragraph = output.find("#diff-added[here]").unwrap();
+    let equation = output.find("#diff-deleted[$ x = 1 $]").unwrap();
+    assert!(
+        paragraph < equation,
+        "deleted equation moved above the paragraph before it: {output}"
+    );
+}
