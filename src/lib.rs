@@ -21,6 +21,27 @@ impl TypstLabel {
     }
 }
 
+pub(crate) struct TypstRaw;
+
+impl TypstRaw {
+    /// Byte length of the raw element at the start of `text`, if there is one.
+    ///
+    /// A run of `n` backticks opens raw text that closes on the next run of `n`
+    /// backticks, except that two backticks are an empty element on their own.
+    /// What lies between is literal: escapes are not applied and brackets do
+    /// not nest, so callers have to copy it through untouched.
+    pub(crate) fn end(text: &str) -> Option<usize> {
+        let open = text.len() - text.trim_start_matches('`').len();
+        match open {
+            0 => None,
+            2 => Some(2),
+            _ => text[open..]
+                .find(&"`".repeat(open))
+                .map(|i| open + i + open),
+        }
+    }
+}
+
 /// A block-level element extracted from a Typst document.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Block {
@@ -158,4 +179,35 @@ pub enum SpanTag {
     Equal,
     Deleted,
     Inserted,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TypstRaw;
+
+    #[test]
+    fn test_raw_end_single_backtick() {
+        assert_eq!(TypstRaw::end("`a`"), Some(3));
+        // A run of one closes on the next backtick, even next to another.
+        assert_eq!(TypstRaw::end("`a``b`"), Some(3));
+    }
+
+    #[test]
+    fn test_raw_end_two_backticks_are_an_empty_element() {
+        assert_eq!(TypstRaw::end("``a``"), Some(2));
+    }
+
+    #[test]
+    fn test_raw_end_matches_the_opening_run_length() {
+        assert_eq!(TypstRaw::end("```rs x```"), Some(10));
+        // Closes after exactly three, leaving the fourth backtick outside.
+        assert_eq!(TypstRaw::end("```a````"), Some(7));
+    }
+
+    #[test]
+    fn test_raw_end_rejects_unterminated_and_non_raw() {
+        assert_eq!(TypstRaw::end("`a"), None);
+        assert_eq!(TypstRaw::end("```a``"), None);
+        assert_eq!(TypstRaw::end("a`b`"), None);
+    }
 }
