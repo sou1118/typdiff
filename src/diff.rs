@@ -181,24 +181,10 @@ fn tokenize_mixed(s: &str) -> Vec<&str> {
                 tokens.push(&s[start..i]);
             }
         } else if c == '$' {
-            // Inline equation: keep `$...$` as one atomic token.
-            // A `$` preceded by an odd number of backslashes is an escaped
-            // literal dollar sign in markup, not a math delimiter.
-            if !preceding_backslashes(s, i).is_multiple_of(2) {
-                tokens.push(&s[i..i + c_len]);
-                i += c_len;
-                continue;
-            }
+            // Inline equation: keep `$...$` as one atomic token. An unclosed
+            // `$` falls back to a single-character token, like `<label>`.
             let start = i;
-            i += 1;
-            while i < s.len() {
-                let next = s[i..].chars().next().unwrap();
-                if next == '$' && preceding_backslashes(s, i).is_multiple_of(2) {
-                    i += 1;
-                    break;
-                }
-                i += next.len_utf8();
-            }
+            i += find_closing_dollar(&s[start..]).unwrap_or(c_len);
             tokens.push(&s[start..i]);
         } else if c == '@' {
             // Typst reference: @label (alphanumeric, hyphens, underscores, colons, periods)
@@ -273,14 +259,25 @@ fn skip_balanced(s: &str, start: usize, open: char, close: char) -> usize {
     i
 }
 
-/// Count the backslashes immediately preceding byte position `i`.
-/// An odd count means the character at `i` is escaped.
-fn preceding_backslashes(s: &str, i: usize) -> usize {
-    s.as_bytes()[..i]
-        .iter()
-        .rev()
-        .take_while(|&&b| b == b'\\')
-        .count()
+/// Byte length of the inline equation at the start of `s`, if it is closed.
+///
+/// `s` must start with `$`. Scans forward for the matching `$`, skipping
+/// escaped characters (`\$`) and quoted strings (`"a $ b"`), since a `$`
+/// inside either does not end the equation. Returns `None` when unclosed.
+fn find_closing_dollar(s: &str) -> Option<usize> {
+    let mut in_string = false;
+    let mut chars = s.char_indices().skip(1);
+    while let Some((i, c)) = chars.next() {
+        match c {
+            '\\' => {
+                chars.next();
+            }
+            '"' => in_string = !in_string,
+            '$' if !in_string => return Some(i + c.len_utf8()),
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Perform mixed-granularity diff and return coalesced spans.
@@ -580,17 +577,31 @@ mod tests {
     }
 
     #[test]
-    fn test_tokenize_dollar_escaping_rules() {
-        // Escaped dollar in markup should not start an equation.
-        let tokens = tokenize_mixed("\\$5 and $x$");
-        assert!(tokens.contains(&"$x$"));
-        assert!(!tokens.iter().any(|t| t.starts_with("$5")));
-        // Even number of backslashes means the `$` is not escaped.
-        let tokens = tokenize_mixed("\\\\$x$");
-        assert!(tokens.contains(&"$x$"));
-        // Escaped `$` inside math should not terminate the equation early.
+    fn test_tokenize_escaped_dollar_inside_equation() {
         let tokens = tokenize_mixed("$x \\$ y$");
         assert_eq!(tokens, vec!["$x \\$ y$"]);
+    }
+
+    #[test]
+    fn test_tokenize_quoted_dollar_inside_equation() {
+        let tokens = tokenize_mixed("Text $\"a $ b\"$ end");
+        assert_eq!(tokens, vec!["Text", " ", "$\"a $ b\"$", " ", "end"]);
+    }
+
+    #[test]
+    fn test_tokenize_unclosed_dollar_is_single_token() {
+        let tokens = tokenize_mixed("Use `$HOME` now");
+        assert_eq!(tokens, vec!["Use", " ", "`", "$", "HOME", "`", " ", "now"]);
+    }
+
+    #[test]
+    fn test_find_closing_dollar() {
+        assert_eq!(find_closing_dollar("$x$ y"), Some(3));
+        assert_eq!(find_closing_dollar("$a \\$ b$"), Some(8));
+        assert_eq!(find_closing_dollar("$\"a $ b\"$"), Some(9));
+        assert_eq!(find_closing_dollar("$\"a \\\" $ b\"$"), Some(12));
+        assert_eq!(find_closing_dollar("$x"), None);
+        assert_eq!(find_closing_dollar("$\"a $ b"), None);
     }
 
     #[test]

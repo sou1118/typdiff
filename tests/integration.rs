@@ -2,6 +2,11 @@ use typdiff::diff::diff;
 use typdiff::parse::parse;
 use typdiff::render::render;
 
+/// True when the rendered output is syntactically valid Typst.
+fn parses(rendered: &str) -> bool {
+    !typst_syntax::parse(rendered).erroneous()
+}
+
 fn run_diff(old: &str, new: &str) -> String {
     let old_blocks: Vec<_> = parse(old)
         .into_iter()
@@ -121,6 +126,20 @@ fn test_inline_footnote_ref_to_funccall() {
         output.contains("study #diff-deleted["),
         "surrounding text should be inline with diff spans: {output}"
     );
+}
+
+#[test]
+fn test_inline_equation_is_deleted_whole() {
+    // Issue #25: the spaces inside the equation used to align with spaces in
+    // the new sentence, leaving `$t` and `"hour"$` in separate deletion blocks.
+    let old = "The half-life is $t = 12.4 \"hour\"$ for this isotope, which is short.\n";
+    let new = "The half-life for this isotope is quite short, as we discuss below.\n";
+    let output = run_diff(old, new);
+    assert!(
+        output.contains("#diff-deleted[is $t = 12.4 \"hour\"$ ]"),
+        "equation should be deleted as one unit: {output}"
+    );
+    assert!(parses(&output), "output must compile: {output}");
 }
 
 #[test]
