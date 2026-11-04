@@ -137,8 +137,9 @@ fn process_replace(old_range: &[Block], new_range: &[Block], results: &mut Vec<D
 /// individual single-character token.
 ///
 /// Typst code expressions (`#func[...]`, `#func(...)`), references (`@label`),
-/// labels (`<label>`), and inline equations (`$...$`) are treated as atomic
-/// tokens so the diff never fragments valid Typst syntax.
+/// labels (`<label>`), inline equations (`$...$`), and escape sequences
+/// (`\x`) are treated as atomic tokens so the diff never fragments valid
+/// Typst syntax.
 ///
 /// This gives word-level granularity for Latin text while allowing
 /// character-level precision for CJK text (which has no whitespace boundaries).
@@ -185,6 +186,15 @@ fn tokenize_mixed(s: &str) -> Vec<&str> {
             // `$` falls back to a single-character token, like `<label>`.
             let start = i;
             i += find_closing_dollar(&s[start..]).unwrap_or(c_len);
+            tokens.push(&s[start..i]);
+        } else if c == '\\' {
+            // Escape sequence: keep `\x` as one token so an escaped `$` in
+            // markup never opens an equation.
+            let start = i;
+            i += c_len;
+            if let Some(next) = s[i..].chars().next() {
+                i += next.len_utf8();
+            }
             tokens.push(&s[start..i]);
         } else if c == '@' {
             // Typst reference: @label (alphanumeric, hyphens, underscores, colons, periods)
@@ -574,6 +584,12 @@ mod tests {
     fn test_tokenize_inline_equation_is_atomic() {
         let tokens = tokenize_mixed("is $t = 12.4 \"hour\"$ for");
         assert_eq!(tokens, vec!["is", " ", "$t = 12.4 \"hour\"$", " ", "for"]);
+    }
+
+    #[test]
+    fn test_tokenize_escaped_dollar_in_markup_is_not_an_equation() {
+        let tokens = tokenize_mixed("\\$5 and $x$");
+        assert_eq!(tokens, vec!["\\$", "5", " ", "and", " ", "$x$"]);
     }
 
     #[test]
