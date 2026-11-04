@@ -209,3 +209,13 @@ fn test_indented_line_comment_does_not_split_paragraph() {
     // A whitespace-only line would be treated as a paragraph break by Typst.
     assert!(!output.contains("\n  \n"));
 }
+
+#[test]
+fn test_deleted_equation_takes_no_number() {
+    let old = "#set math.equation(numbering: \"(1)\")\n\n$ y $\n\n$ z $ <eq-z>\n\nSee @eq-z.\n";
+    let new = "#set math.equation(numbering: \"(1)\")\n\n$ z $ <eq-z>\n\nSee @eq-z.\n";
+    let output = run_diff(old, new);
+
+    // Numbered, the deleted equation would push `@eq-z` from (1) to (2).
+    assert!(output.contains("#diff-deleted[#set math.equation(numbering: none)\n$ y $]"));
+}
