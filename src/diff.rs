@@ -137,8 +137,9 @@ fn process_replace(old_range: &[Block], new_range: &[Block], results: &mut Vec<D
 /// individual single-character token.
 ///
 /// Typst code expressions (`#func[...]`, `#func(...)`), references (`@label`),
-/// and labels (`<label>`) are treated as atomic tokens so the diff never
-/// fragments valid Typst syntax.
+/// labels (`<label>`), inline equations (`$...$`), and escape sequences
+/// (`\x`) are treated as atomic tokens so the diff never fragments valid
+/// Typst syntax.
 ///
 /// This gives word-level granularity for Latin text while allowing
 /// character-level precision for CJK text (which has no whitespace boundaries).
@@ -180,6 +181,21 @@ fn tokenize_mixed(s: &str) -> Vec<&str> {
                 // Standalone '#'
                 tokens.push(&s[start..i]);
             }
+        } else if c == '$' {
+            // Inline equation: keep `$...$` as one atomic token. An unclosed
+            // `$` falls back to a single-character token, like `<label>`.
+            let start = i;
+            i += find_closing_dollar(&s[start..]).unwrap_or(c_len);
+            tokens.push(&s[start..i]);
+        } else if c == '\\' {
+            // Escape sequence: keep `\x` as one token so an escaped `$` in
+            // markup never opens an equation.
+            let start = i;
+            i += c_len;
+            if let Some(next) = s[i..].chars().next() {
+                i += next.len_utf8();
+            }
+            tokens.push(&s[start..i]);
         } else if c == '@' {
             // Typst reference: @label (alphanumeric, hyphens, underscores, colons, periods)
             let start = i;
@@ -251,6 +267,27 @@ fn skip_balanced(s: &str, start: usize, open: char, close: char) -> usize {
         i += c_len;
     }
     i
+}
+
+/// Byte length of the inline equation at the start of `s`, if it is closed.
+///
+/// `s` must start with `$`. Scans forward for the matching `$`, skipping
+/// escaped characters (`\$`) and quoted strings (`"a $ b"`), since a `$`
+/// inside either does not end the equation. Returns `None` when unclosed.
+fn find_closing_dollar(s: &str) -> Option<usize> {
+    let mut in_string = false;
+    let mut chars = s.char_indices().skip(1);
+    while let Some((i, c)) = chars.next() {
+        match c {
+            '\\' => {
+                chars.next();
+            }
+            '"' => in_string = !in_string,
+            '$' if !in_string => return Some(i + c.len_utf8()),
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Perform mixed-granularity diff and return coalesced spans.
@@ -541,6 +578,46 @@ mod tests {
     fn test_tokenize_typst_label_atomic() {
         let tokens = tokenize_mixed("<sample-widget_anchor>");
         assert_eq!(tokens, vec!["<sample-widget_anchor>"]);
+    }
+
+    #[test]
+    fn test_tokenize_inline_equation_is_atomic() {
+        let tokens = tokenize_mixed("is $t = 12.4 \"hour\"$ for");
+        assert_eq!(tokens, vec!["is", " ", "$t = 12.4 \"hour\"$", " ", "for"]);
+    }
+
+    #[test]
+    fn test_tokenize_escaped_dollar_in_markup_is_not_an_equation() {
+        let tokens = tokenize_mixed("\\$5 and $x$");
+        assert_eq!(tokens, vec!["\\$", "5", " ", "and", " ", "$x$"]);
+    }
+
+    #[test]
+    fn test_tokenize_escaped_dollar_inside_equation() {
+        let tokens = tokenize_mixed("$x \\$ y$");
+        assert_eq!(tokens, vec!["$x \\$ y$"]);
+    }
+
+    #[test]
+    fn test_tokenize_quoted_dollar_inside_equation() {
+        let tokens = tokenize_mixed("Text $\"a $ b\"$ end");
+        assert_eq!(tokens, vec!["Text", " ", "$\"a $ b\"$", " ", "end"]);
+    }
+
+    #[test]
+    fn test_tokenize_unclosed_dollar_is_single_token() {
+        let tokens = tokenize_mixed("Use `$HOME` now");
+        assert_eq!(tokens, vec!["Use", " ", "`", "$", "HOME", "`", " ", "now"]);
+    }
+
+    #[test]
+    fn test_find_closing_dollar() {
+        assert_eq!(find_closing_dollar("$x$ y"), Some(3));
+        assert_eq!(find_closing_dollar("$a \\$ b$"), Some(8));
+        assert_eq!(find_closing_dollar("$\"a $ b\"$"), Some(9));
+        assert_eq!(find_closing_dollar("$\"a \\\" $ b\"$"), Some(12));
+        assert_eq!(find_closing_dollar("$x"), None);
+        assert_eq!(find_closing_dollar("$\"a $ b"), None);
     }
 
     #[test]
