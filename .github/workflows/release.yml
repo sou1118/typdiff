@@ -1,16 +1,23 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag of the draft release (e.g. v0.1.5)
+        type: string
+        required: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: release-${{ inputs.tag }}
   cancel-in-progress: false
 
 env:
@@ -44,6 +51,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: refs/tags/${{ inputs.tag }}
           persist-credentials: false
       - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
         with:
@@ -87,13 +95,21 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+      - name: Resolve tag commit
+        id: tag
+        run: echo "sha=$(gh api "repos/$GH_REPO/commits/$TAG" --jq .sha)" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
       - name: Sign packslip
         id: packslip
         uses: jdx/packslip@7b32cd29a9240927882ee18b3db1dcfd8e0328b4 # v1.7.0
         with:
           artifacts: artifacts/*
           bin: typdiff
-          # The build jobs already attest each archive
+          tag: ${{ inputs.tag }}
+          commit: ${{ steps.tag.outputs.sha }}
           attest: link
           upload: false
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -114,34 +130,11 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
-        with:
-          generate_release_notes: true
-          files: artifacts/*
+      - name: Upload assets and publish release
+        run: |
+          gh release upload "$TAG" artifacts/* --clobber
+          gh release edit "$TAG" --draft=false
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  publish:
-    name: Publish to crates.io
-    needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      id-token: write
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
-        with:
-          install_args: rust
-          cache: false
-      - name: Authenticate with crates.io
-        id: auth
-        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
-      - name: Publish
-        run: cargo publish
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}

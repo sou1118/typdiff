@@ -1,0 +1,17 @@
+[workspace]
+# Only release when a release PR is merged, not on every push to main
+release_always = false
+# Immutable releases reject asset uploads after publishing, so release-plz
+# leaves a draft and release.yml publishes it once the binaries are attached
+git_release_draft = true
+
+[changelog]
+commit_parsers = [
+  { message = "^feat", group = "added" },
+  { message = "^fix", group = "fixed" },
+  { message = "^perf", group = "performance" },
+  { message = "^refactor", group = "changed" },
+  { message = "^docs?", group = "documentation" },
+  { message = "^(chore|ci|test|style|build)", skip = true },
+  { message = "^.*", group = "other" },
+]
