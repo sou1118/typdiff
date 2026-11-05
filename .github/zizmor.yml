@@ -1,5 +1,0 @@
-rules:
-  superfluous-actions:
-    ignore:
-      # action-gh-release is kept for generate_release_notes and asset handling.
-      - release.yml
