@@ -1,4 +1,5 @@
-use similar::{Algorithm, ChangeTag, DiffOp, TextDiff};
+use similar::{Algorithm, DiffOp, TextDiff};
+use typst_syntax::{SyntaxKind, SyntaxNode};
 
 use crate::{Block, DiffResult, DiffSpan, SpanTag, TypstLabel};
 
@@ -132,26 +133,39 @@ fn process_replace(old_range: &[Block], new_range: &[Block], results: &mut Vec<D
     }
 }
 
-/// Tokenize text for diffing: ASCII alphanumeric runs form word tokens,
+/// Tokenize text for diffing: runs of non-CJK alphanumeric characters form word
+/// tokens (an intraword `_` or `*`, as in `snake_case`, stays inside the word),
 /// everything else (CJK characters, punctuation, whitespace) becomes an
 /// individual single-character token.
 ///
 /// Typst code expressions (`#func[...]`, `#func(...)`), references (`@label`),
-/// labels (`<label>`), inline equations (`$...$`), and escape sequences
-/// (`\x`) are treated as atomic tokens so the diff never fragments valid
-/// Typst syntax.
+/// labels (`<label>`), inline equations (`$...$`), emphasis and strong spans
+/// (`_..._`, `*...*`), and escape sequences (`\x`) are treated as atomic
+/// tokens so the diff never fragments valid Typst syntax.
 ///
 /// This gives word-level granularity for Latin text while allowing
 /// character-level precision for CJK text (which has no whitespace boundaries).
 fn tokenize_mixed(s: &str) -> Vec<&str> {
     let mut tokens = Vec::new();
     let mut i = 0;
+    let emphasis = emphasis_spans(s);
+    let mut next_emphasis = 0;
 
     while i < s.len() {
         let c = s[i..].chars().next().unwrap();
         let c_len = c.len_utf8();
 
-        if c == '#' {
+        // Skip spans that begin inside a token consumed earlier (`#f[_x_]`).
+        while next_emphasis < emphasis.len() && emphasis[next_emphasis].0 < i {
+            next_emphasis += 1;
+        }
+
+        if next_emphasis < emphasis.len() && emphasis[next_emphasis].0 == i {
+            // Emphasis or strong span: keep `_..._` / `*...*` as one token.
+            let end = emphasis[next_emphasis].1;
+            tokens.push(&s[i..end]);
+            i = end;
+        } else if c == '#' {
             // Typst code expression: #identifier followed by [...] and/or (...)
             let start = i;
             i += 1; // skip '#'
@@ -217,15 +231,22 @@ fn tokenize_mixed(s: &str) -> Vec<&str> {
                 i += c_len;
             }
             tokens.push(&s[start..i]);
-        } else if c.is_ascii_alphanumeric() {
+        } else if is_wordy(c) {
+            // Word token. An `_` or `*` between two word characters is kept
+            // inside the token: Typst treats it as literal text there, but it
+            // would become a delimiter once a diff mark sits next to it.
             let start = i;
             i += c_len;
-            while i < s.len() {
-                let next = s[i..].chars().next().unwrap();
-                if !next.is_ascii_alphanumeric() {
+            while let Some(next) = s[i..].chars().next() {
+                if is_wordy(next) {
+                    i += next.len_utf8();
+                } else if matches!(next, '_' | '*')
+                    && s[i + 1..].chars().next().is_some_and(is_wordy)
+                {
+                    i += 1;
+                } else {
                     break;
                 }
-                i += next.len_utf8();
             }
             tokens.push(&s[start..i]);
         } else {
@@ -235,6 +256,18 @@ fn tokenize_mixed(s: &str) -> Vec<&str> {
     }
 
     tokens
+}
+
+/// Whether `c` counts as a word character for Typst's intraword rule: alphanumeric
+/// and not CJK. Mirrors `Lexer::in_word` in typst-syntax, which decides when `_`
+/// and `*` are literal text instead of emphasis delimiters.
+fn is_wordy(c: char) -> bool {
+    use unicode_script::{Script, UnicodeScript};
+    c.is_alphanumeric()
+        && !matches!(
+            c.script(),
+            Script::Han | Script::Hiragana | Script::Katakana | Script::Hangul
+        )
 }
 
 /// Skip over a balanced delimiter group starting at position `i`.
@@ -290,29 +323,125 @@ fn find_closing_dollar(s: &str) -> Option<usize> {
     None
 }
 
+/// Byte ranges of the outermost emphasis (`_..._`) and strong (`*...*`) spans
+/// in `s`, in document order.
+///
+/// The ranges come from the Typst parser, so they follow Typst's own rules:
+/// no emphasis inside a word (`snake_case`), none in references, labels, raw
+/// text or math, and escaped delimiters are ignored. A span the parser reports
+/// as erroneous (an unclosed delimiter) is left out.
+fn emphasis_spans(s: &str) -> Vec<(usize, usize)> {
+    // Nested diffs re-tokenize span interiors; skip the parse when no delimiter can occur.
+    if !s.contains(['_', '*']) {
+        return Vec::new();
+    }
+
+    fn collect(node: &SyntaxNode, mut offset: usize, out: &mut Vec<(usize, usize)>) {
+        for child in node.children() {
+            let end = offset + child.len();
+            match child.kind() {
+                SyntaxKind::Emph | SyntaxKind::Strong if !child.erroneous() => {
+                    out.push((offset, end));
+                }
+                _ => collect(child, offset, out),
+            }
+            offset = end;
+        }
+    }
+
+    let mut spans = Vec::new();
+    collect(&typst_syntax::parse(s), 0, &mut spans);
+    spans
+}
+
+/// The delimiter (`_` or `*`) of a token produced for an emphasis or strong span.
+fn emphasis_delimiter(token: &str) -> Option<char> {
+    let delimiter = token.chars().next().filter(|c| matches!(c, '_' | '*'))?;
+    (token.len() >= 2 && token.ends_with(delimiter)).then_some(delimiter)
+}
+
 /// Perform mixed-granularity diff and return coalesced spans.
 ///
 /// Uses a custom tokenizer that splits CJK characters individually while
 /// keeping ASCII words intact, then diffs at the token level.
 fn word_diff(old_text: &str, new_text: &str) -> Vec<DiffSpan> {
+    coalesce_spans(diff_tokens(old_text, new_text))
+}
+
+/// Token-level diff of `old_text` against `new_text`, without coalescing.
+///
+/// An emphasis or strong token is atomic, so it is deleted or inserted whole.
+/// When one is replaced by another with the same delimiter, the delimiters stay
+/// unmarked and the text between them is diffed recursively.
+fn diff_tokens(old_text: &str, new_text: &str) -> Vec<DiffSpan> {
     let old_tokens = tokenize_mixed(old_text);
     let new_tokens = tokenize_mixed(new_text);
 
     let diff = TextDiff::configure().diff_slices(&old_tokens, &new_tokens);
 
-    let raw_spans: Vec<DiffSpan> = diff
-        .iter_all_changes()
-        .map(|change| DiffSpan {
-            tag: match change.tag() {
-                ChangeTag::Equal => SpanTag::Equal,
-                ChangeTag::Delete => SpanTag::Deleted,
-                ChangeTag::Insert => SpanTag::Inserted,
-            },
-            text: change.value().to_string(),
-        })
-        .collect();
-
-    coalesce_spans(raw_spans)
+    let span = |tag, text: &str| DiffSpan {
+        tag,
+        text: text.to_string(),
+    };
+    let mut spans = Vec::new();
+    for op in diff.ops() {
+        match *op {
+            DiffOp::Equal { old_index, len, .. } => {
+                for t in &old_tokens[old_index..old_index + len] {
+                    spans.push(span(SpanTag::Equal, t));
+                }
+            }
+            DiffOp::Delete {
+                old_index, old_len, ..
+            } => {
+                for t in &old_tokens[old_index..old_index + old_len] {
+                    spans.push(span(SpanTag::Deleted, t));
+                }
+            }
+            DiffOp::Insert {
+                new_index, new_len, ..
+            } => {
+                for t in &new_tokens[new_index..new_index + new_len] {
+                    spans.push(span(SpanTag::Inserted, t));
+                }
+            }
+            DiffOp::Replace {
+                old_index,
+                old_len,
+                new_index,
+                new_len,
+            } => {
+                let mut old = &old_tokens[old_index..old_index + old_len];
+                let mut new = &new_tokens[new_index..new_index + new_len];
+                // Pair the first span token of each side when they sit at the
+                // same offset and share a delimiter: the tokens before them are
+                // replaced, the pair is diffed inside, and the rest is handled
+                // the same way. A span that moved (different offsets) is
+                // replaced whole.
+                while let (Some(i), Some(j)) = (
+                    old.iter().position(|t| emphasis_delimiter(t).is_some()),
+                    new.iter().position(|t| emphasis_delimiter(t).is_some()),
+                ) {
+                    let (o, n) = (old[i], new[j]);
+                    let d = emphasis_delimiter(o);
+                    if i != j || d != emphasis_delimiter(n) {
+                        break;
+                    }
+                    let delimiter = d.unwrap().to_string();
+                    spans.extend(old[..i].iter().map(|t| span(SpanTag::Deleted, t)));
+                    spans.extend(new[..j].iter().map(|t| span(SpanTag::Inserted, t)));
+                    spans.push(span(SpanTag::Equal, &delimiter));
+                    spans.extend(diff_tokens(&o[1..o.len() - 1], &n[1..n.len() - 1]));
+                    spans.push(span(SpanTag::Equal, &delimiter));
+                    old = &old[i + 1..];
+                    new = &new[j + 1..];
+                }
+                spans.extend(old.iter().map(|t| span(SpanTag::Deleted, t)));
+                spans.extend(new.iter().map(|t| span(SpanTag::Inserted, t)));
+            }
+        }
+    }
+    spans
 }
 
 /// Merge adjacent spans that have the same tag.
@@ -618,6 +747,217 @@ mod tests {
         assert_eq!(find_closing_dollar("$\"a \\\" $ b\"$"), Some(12));
         assert_eq!(find_closing_dollar("$x"), None);
         assert_eq!(find_closing_dollar("$\"a $ b"), None);
+    }
+
+    #[test]
+    fn test_tokenize_emphasis_is_atomic() {
+        let tokens = tokenize_mixed("A _quick brown_ fox");
+        assert_eq!(tokens, vec!["A", " ", "_quick brown_", " ", "fox"]);
+    }
+
+    #[test]
+    fn test_tokenize_strong_is_atomic() {
+        let tokens = tokenize_mixed("A *quick brown* fox");
+        assert_eq!(tokens, vec!["A", " ", "*quick brown*", " ", "fox"]);
+    }
+
+    #[test]
+    fn test_tokenize_nested_emphasis_is_one_token() {
+        let tokens = tokenize_mixed("*bold _and italic_ text* end");
+        assert_eq!(tokens, vec!["*bold _and italic_ text*", " ", "end"]);
+    }
+
+    #[test]
+    fn test_tokenize_emphasis_with_equation_and_reference() {
+        let tokens = tokenize_mixed("_the $x _ y$ value @fig_1 here_ ok");
+        assert_eq!(tokens, vec!["_the $x _ y$ value @fig_1 here_", " ", "ok"]);
+    }
+
+    #[test]
+    fn test_tokenize_intraword_underscore_is_not_emphasis() {
+        let tokens = tokenize_mixed("snake_case and other_name");
+        assert_eq!(tokens, vec!["snake_case", " ", "and", " ", "other_name"]);
+    }
+
+    #[test]
+    fn test_tokenize_intraword_star_and_non_ascii() {
+        assert_eq!(tokenize_mixed("2*3 é_b"), vec!["2*3", " ", "é_b"]);
+        // Not intraword: a delimiter next to a space, punctuation or CJK stays separate.
+        assert_eq!(tokenize_mixed("a_ b"), vec!["a", "_", " ", "b"]);
+        assert_eq!(tokenize_mixed("a_猫"), vec!["a", "_", "猫"]);
+    }
+
+    /// Diff two paragraphs and return the rendered Typst markup of the result.
+    fn render_diff(old: &str, new: &str) -> String {
+        word_diff(old, new)
+            .iter()
+            .map(|s| match s.tag {
+                SpanTag::Equal => s.text.clone(),
+                SpanTag::Deleted => format!("#diff-deleted[{}]", s.text),
+                SpanTag::Inserted => format!("#diff-added[{}]", s.text),
+            })
+            .collect()
+    }
+
+    /// The rendered diff must parse without errors.
+    fn assert_parses(rendered: &str) {
+        let root = typst_syntax::parse(rendered);
+        assert!(!root.erroneous(), "does not parse: {rendered}");
+    }
+
+    #[test]
+    fn test_word_diff_intraword_underscore_changes_whole_word() {
+        let out = render_diff("A snake_case here.", "A camel_case here.");
+        assert_eq!(
+            out,
+            "A #diff-deleted[snake_case]#diff-added[camel_case] here."
+        );
+        assert_parses(&out);
+    }
+
+    #[test]
+    fn test_word_diff_intraword_underscore_variants_parse() {
+        for (old, new) in [
+            ("A a_b_c here.", "A a_b_d here."),
+            ("A x_1 here.", "A x_2 here."),
+            ("A _a_b_ c.", "A _a_d_ c."),
+            ("A a*b here.", "A a*c here."),
+        ] {
+            let out = render_diff(old, new);
+            assert_parses(&out);
+        }
+        assert_eq!(
+            render_diff("A a_b_c here.", "A a_b_d here."),
+            "A #diff-deleted[a_b_c]#diff-added[a_b_d] here."
+        );
+        assert_eq!(
+            render_diff("A _a_b_ c.", "A _a_d_ c."),
+            "A _#diff-deleted[a_b]#diff-added[a_d]_ c."
+        );
+    }
+
+    #[test]
+    fn test_tokenize_escaped_delimiters_are_not_emphasis() {
+        let tokens = tokenize_mixed("\\_a b\\_ and \\*c d\\*");
+        assert!(
+            tokens
+                .iter()
+                .all(|t| t.len() <= 2 || !t.starts_with(['_', '*'])),
+            "escaped delimiters must not form a span: {tokens:?}"
+        );
+        assert_eq!(&tokens[..2], &["\\_", "a"]);
+    }
+
+    #[test]
+    fn test_tokenize_unclosed_emphasis_is_single_token() {
+        let tokens = tokenize_mixed("A _quick brown fox");
+        assert_eq!(
+            tokens,
+            vec!["A", " ", "_", "quick", " ", "brown", " ", "fox"]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_delimiters_in_raw_and_function_are_not_split() {
+        let tokens = tokenize_mixed("`a_b c_d` #emph[_x y_] z");
+        assert_eq!(
+            tokens,
+            vec!["`", "a_b", " ", "c_d", "`", " ", "#emph[_x y_]", " ", "z"]
+        );
+    }
+
+    #[test]
+    fn test_word_diff_emphasis_deleted_whole() {
+        let spans = word_diff("A _quick brown_ fox.", "A slow red fox.");
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.tag == SpanTag::Deleted && s.text == "_quick brown_"),
+            "emphasis should be deleted as one unit: {spans:?}"
+        );
+    }
+
+    #[test]
+    fn test_word_diff_emphasis_added_whole() {
+        let spans = word_diff("A quick brown fox.", "A _slow red_ fox.");
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.tag == SpanTag::Inserted && s.text == "_slow red_"),
+            "emphasis should be added as one unit: {spans:?}"
+        );
+    }
+
+    #[test]
+    fn test_word_diff_kept_emphasis_diffs_inside() {
+        let spans = word_diff("A _quick brown_ fox.", "A _slow brown_ fox.");
+        let texts: Vec<(SpanTag, &str)> = spans.iter().map(|s| (s.tag, s.text.as_str())).collect();
+        assert_eq!(
+            texts,
+            vec![
+                (SpanTag::Equal, "A _"),
+                (SpanTag::Deleted, "quick"),
+                (SpanTag::Inserted, "slow"),
+                (SpanTag::Equal, " brown_ fox."),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_word_diff_different_delimiters_replaced_whole() {
+        let spans = word_diff("A _quick_ fox.", "A *quick* fox.");
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.tag == SpanTag::Deleted && s.text == "_quick_")
+                && spans
+                    .iter()
+                    .any(|s| s.tag == SpanTag::Inserted && s.text == "*quick*"),
+            "different delimiters should be replaced whole: {spans:?}"
+        );
+    }
+
+    #[test]
+    fn test_word_diff_multi_token_replace_keeps_delimiters() {
+        let out = render_diff("A _a b_, c.", "A _a d_; c.");
+        assert_eq!(
+            out,
+            "A _a #diff-deleted[b]#diff-added[d]_#diff-deleted[,]#diff-added[;] c."
+        );
+        assert_parses(&out);
+    }
+
+    #[test]
+    fn test_word_diff_multi_token_replace_pairs_after_leading_tokens() {
+        let out = render_diff("A x _a b_ y.", "A z _a d_ v.");
+        assert_parses(&out);
+        assert!(
+            out.contains("_a #diff-deleted[b]#diff-added[d]_"),
+            "span should be paired: {out}"
+        );
+    }
+
+    #[test]
+    fn test_word_diff_multi_token_replace_pairs_several_spans() {
+        let out = render_diff("A _a b_, *c d*; e.", "A _a x_: *c y*! e.");
+        assert_parses(&out);
+        assert!(out.contains("_a #diff-deleted[b]#diff-added[x]_"), "{out}");
+        assert!(out.contains("*c #diff-deleted[d]#diff-added[y]*"), "{out}");
+    }
+
+    #[test]
+    fn test_word_diff_multi_token_replace_moved_span_is_replaced_whole() {
+        let out = render_diff("A *quick brown* fox.", "A quick *brown* fox.");
+        assert_parses(&out);
+        assert!(out.contains("#diff-deleted[*quick brown*]"), "{out}");
+    }
+
+    #[test]
+    fn test_word_diff_multi_token_replace_mismatched_delimiters() {
+        let out = render_diff("A _a b_, c.", "A *a b*; c.");
+        assert_parses(&out);
+        assert!(out.contains("#diff-deleted[_a b_,]"), "{out}");
+        assert!(out.contains("#diff-added[*a b*;]"), "{out}");
     }
 
     #[test]
