@@ -17,6 +17,7 @@ typst-syntax = "0.14"
 similar = "3"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
+unicode-script = "0.5"
 
 [dev-dependencies]
 pretty_assertions = "=1.4.1"

@@ -133,7 +133,8 @@ fn process_replace(old_range: &[Block], new_range: &[Block], results: &mut Vec<D
     }
 }
 
-/// Tokenize text for diffing: ASCII alphanumeric runs form word tokens,
+/// Tokenize text for diffing: runs of non-CJK alphanumeric characters form word
+/// tokens (an intraword `_` or `*`, as in `snake_case`, stays inside the word),
 /// everything else (CJK characters, punctuation, whitespace) becomes an
 /// individual single-character token.
 ///
@@ -230,15 +231,22 @@ fn tokenize_mixed(s: &str) -> Vec<&str> {
                 i += c_len;
             }
             tokens.push(&s[start..i]);
-        } else if c.is_ascii_alphanumeric() {
+        } else if is_wordy(c) {
+            // Word token. An `_` or `*` between two word characters is kept
+            // inside the token: Typst treats it as literal text there, but it
+            // would become a delimiter once a diff mark sits next to it.
             let start = i;
             i += c_len;
-            while i < s.len() {
-                let next = s[i..].chars().next().unwrap();
-                if !next.is_ascii_alphanumeric() {
+            while let Some(next) = s[i..].chars().next() {
+                if is_wordy(next) {
+                    i += next.len_utf8();
+                } else if matches!(next, '_' | '*')
+                    && s[i + 1..].chars().next().is_some_and(is_wordy)
+                {
+                    i += 1;
+                } else {
                     break;
                 }
-                i += next.len_utf8();
             }
             tokens.push(&s[start..i]);
         } else {
@@ -248,6 +256,18 @@ fn tokenize_mixed(s: &str) -> Vec<&str> {
     }
 
     tokens
+}
+
+/// Whether `c` counts as a word character for Typst's intraword rule: alphanumeric
+/// and not CJK. Mirrors `Lexer::in_word` in typst-syntax, which decides when `_`
+/// and `*` are literal text instead of emphasis delimiters.
+fn is_wordy(c: char) -> bool {
+    use unicode_script::{Script, UnicodeScript};
+    c.is_alphanumeric()
+        && !matches!(
+            c.script(),
+            Script::Han | Script::Hiragana | Script::Katakana | Script::Hangul
+        )
 }
 
 /// Skip over a balanced delimiter group starting at position `i`.
@@ -311,6 +331,11 @@ fn find_closing_dollar(s: &str) -> Option<usize> {
 /// text or math, and escaped delimiters are ignored. A span the parser reports
 /// as erroneous (an unclosed delimiter) is left out.
 fn emphasis_spans(s: &str) -> Vec<(usize, usize)> {
+    // Nested diffs re-tokenize span interiors; skip the parse when no delimiter can occur.
+    if !s.contains(['_', '*']) {
+        return Vec::new();
+    }
+
     fn collect(node: &SyntaxNode, mut offset: usize, out: &mut Vec<(usize, usize)>) {
         for child in node.children() {
             let end = offset + child.len();
@@ -742,9 +767,63 @@ mod tests {
     #[test]
     fn test_tokenize_intraword_underscore_is_not_emphasis() {
         let tokens = tokenize_mixed("snake_case and other_name");
+        assert_eq!(tokens, vec!["snake_case", " ", "and", " ", "other_name"]);
+    }
+
+    #[test]
+    fn test_tokenize_intraword_star_and_non_ascii() {
+        assert_eq!(tokenize_mixed("2*3 é_b"), vec!["2*3", " ", "é_b"]);
+        // Not intraword: a delimiter next to a space, punctuation or CJK stays separate.
+        assert_eq!(tokenize_mixed("a_ b"), vec!["a", "_", " ", "b"]);
+        assert_eq!(tokenize_mixed("a_猫"), vec!["a", "_", "猫"]);
+    }
+
+    /// Diff two paragraphs and return the rendered Typst markup of the result.
+    fn render_diff(old: &str, new: &str) -> String {
+        word_diff(old, new)
+            .iter()
+            .map(|s| match s.tag {
+                SpanTag::Equal => s.text.clone(),
+                SpanTag::Deleted => format!("#diff-deleted[{}]", s.text),
+                SpanTag::Inserted => format!("#diff-added[{}]", s.text),
+            })
+            .collect()
+    }
+
+    /// The rendered diff must parse without errors.
+    fn assert_parses(rendered: &str) {
+        let root = typst_syntax::parse(rendered);
+        assert!(!root.erroneous(), "does not parse: {rendered}");
+    }
+
+    #[test]
+    fn test_word_diff_intraword_underscore_changes_whole_word() {
+        let out = render_diff("A snake_case here.", "A camel_case here.");
         assert_eq!(
-            tokens,
-            vec!["snake", "_", "case", " ", "and", " ", "other", "_", "name"]
+            out,
+            "A #diff-deleted[snake_case]#diff-added[camel_case] here."
+        );
+        assert_parses(&out);
+    }
+
+    #[test]
+    fn test_word_diff_intraword_underscore_variants_parse() {
+        for (old, new) in [
+            ("A a_b_c here.", "A a_b_d here."),
+            ("A x_1 here.", "A x_2 here."),
+            ("A _a_b_ c.", "A _a_d_ c."),
+            ("A a*b here.", "A a*c here."),
+        ] {
+            let out = render_diff(old, new);
+            assert_parses(&out);
+        }
+        assert_eq!(
+            render_diff("A a_b_c here.", "A a_b_d here."),
+            "A #diff-deleted[a_b_c]#diff-added[a_b_d] here."
+        );
+        assert_eq!(
+            render_diff("A _a_b_ c.", "A _a_d_ c."),
+            "A _#diff-deleted[a_b]#diff-added[a_d]_ c."
         );
     }
 
@@ -774,21 +853,7 @@ mod tests {
         let tokens = tokenize_mixed("`a_b c_d` #emph[_x y_] z");
         assert_eq!(
             tokens,
-            vec![
-                "`",
-                "a",
-                "_",
-                "b",
-                " ",
-                "c",
-                "_",
-                "d",
-                "`",
-                " ",
-                "#emph[_x y_]",
-                " ",
-                "z"
-            ]
+            vec!["`", "a_b", " ", "c_d", "`", " ", "#emph[_x y_]", " ", "z"]
         );
     }
 
