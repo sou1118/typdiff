@@ -143,6 +143,41 @@ fn test_inline_equation_is_deleted_whole() {
 }
 
 #[test]
+fn test_deleted_cite_keeps_label_argument() {
+    // Issue #63: `\<key>` inside a call does not parse.
+    let output = run_diff(
+        "As shown by #cite(<key>, form: \"prose\"), it works.\n",
+        "It works.\n",
+    );
+    assert!(
+        output.contains("#cite(<key>, form: \"prose\")"),
+        "label argument should stay bare: {output}"
+    );
+    assert!(!output.contains("\\<key>"), "{output}");
+    assert!(parses(&output), "output must compile: {output}");
+}
+
+#[test]
+fn test_deleted_link_keeps_label_argument() {
+    let output = run_diff("See #link(<sec>)[the section] for more.\n", "More.\n");
+    assert!(
+        output.contains("#link(<sec>)[the section]"),
+        "label argument should stay bare: {output}"
+    );
+    assert!(parses(&output), "output must compile: {output}");
+}
+
+#[test]
+fn test_deleted_markup_label_and_ref_still_escaped() {
+    let output = run_diff("Text <lbl> and @lbl here.\n", "New.\n");
+    assert!(
+        output.contains("Text \\<lbl> and \\@lbl here."),
+        "markup label and ref should be escaped: {output}"
+    );
+    assert!(parses(&output), "output must compile: {output}");
+}
+
+#[test]
 fn test_markup_reference_paragraph() {
     let old = std::fs::read_to_string("tests/fixtures/markup-ref-start-old.typ").unwrap();
     let new = std::fs::read_to_string("tests/fixtures/markup-ref-start-new.typ").unwrap();
