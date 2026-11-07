@@ -18,6 +18,10 @@ struct Cli {
     /// Output file path (defaults to stdout)
     #[arg(short, long)]
     output: Option<String>,
+
+    /// Omit the definitions of diff-added and diff-deleted from the output
+    #[arg(long)]
+    no_preamble: bool,
 }
 
 fn main() -> Result<()> {
@@ -39,7 +43,11 @@ fn main() -> Result<()> {
 
     let diff_results = typdiff::diff::diff(&old_blocks, &new_blocks);
 
-    let output = typdiff::render::render(&diff_results);
+    let output = if cli.no_preamble {
+        typdiff::render::render_body(&diff_results)
+    } else {
+        typdiff::render::render(&diff_results)
+    };
 
     match cli.output {
         Some(path) => {

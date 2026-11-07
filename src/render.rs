@@ -14,9 +14,13 @@ const PREAMBLE: &str = r##"#let diff-added(body) = {
 
 /// Render a list of diff results into a compilable Typst source string.
 pub fn render(results: &[DiffResult]) -> String {
+    format!("{PREAMBLE}\n{}", render_body(results))
+}
+
+/// Render diff results without the preamble that defines `diff-added` and
+/// `diff-deleted`. The caller must make those functions available.
+pub fn render_body(results: &[DiffResult]) -> String {
     let mut out = String::new();
-    out.push_str(PREAMBLE);
-    out.push('\n');
 
     for result in results {
         match result {
