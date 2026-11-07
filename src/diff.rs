@@ -411,24 +411,33 @@ fn diff_tokens(old_text: &str, new_text: &str) -> Vec<DiffSpan> {
                 new_index,
                 new_len,
             } => {
-                let old = &old_tokens[old_index..old_index + old_len];
-                let new = &new_tokens[new_index..new_index + new_len];
-                if let ([o], [n]) = (old, new)
-                    && let Some(d) = emphasis_delimiter(o)
-                    && emphasis_delimiter(n) == Some(d)
-                {
-                    let delimiter = d.to_string();
+                let mut old = &old_tokens[old_index..old_index + old_len];
+                let mut new = &new_tokens[new_index..new_index + new_len];
+                // Pair the first span token of each side when they sit at the
+                // same offset and share a delimiter: the tokens before them are
+                // replaced, the pair is diffed inside, and the rest is handled
+                // the same way. A span that moved (different offsets) is
+                // replaced whole.
+                while let (Some(i), Some(j)) = (
+                    old.iter().position(|t| emphasis_delimiter(t).is_some()),
+                    new.iter().position(|t| emphasis_delimiter(t).is_some()),
+                ) {
+                    let (o, n) = (old[i], new[j]);
+                    let d = emphasis_delimiter(o);
+                    if i != j || d != emphasis_delimiter(n) {
+                        break;
+                    }
+                    let delimiter = d.unwrap().to_string();
+                    spans.extend(old[..i].iter().map(|t| span(SpanTag::Deleted, t)));
+                    spans.extend(new[..j].iter().map(|t| span(SpanTag::Inserted, t)));
                     spans.push(span(SpanTag::Equal, &delimiter));
                     spans.extend(diff_tokens(&o[1..o.len() - 1], &n[1..n.len() - 1]));
                     spans.push(span(SpanTag::Equal, &delimiter));
-                } else {
-                    for t in old {
-                        spans.push(span(SpanTag::Deleted, t));
-                    }
-                    for t in new {
-                        spans.push(span(SpanTag::Inserted, t));
-                    }
+                    old = &old[i + 1..];
+                    new = &new[j + 1..];
                 }
+                spans.extend(old.iter().map(|t| span(SpanTag::Deleted, t)));
+                spans.extend(new.iter().map(|t| span(SpanTag::Inserted, t)));
             }
         }
     }
@@ -906,6 +915,49 @@ mod tests {
                     .any(|s| s.tag == SpanTag::Inserted && s.text == "*quick*"),
             "different delimiters should be replaced whole: {spans:?}"
         );
+    }
+
+    #[test]
+    fn test_word_diff_multi_token_replace_keeps_delimiters() {
+        let out = render_diff("A _a b_, c.", "A _a d_; c.");
+        assert_eq!(
+            out,
+            "A _a #diff-deleted[b]#diff-added[d]_#diff-deleted[,]#diff-added[;] c."
+        );
+        assert_parses(&out);
+    }
+
+    #[test]
+    fn test_word_diff_multi_token_replace_pairs_after_leading_tokens() {
+        let out = render_diff("A x _a b_ y.", "A z _a d_ v.");
+        assert_parses(&out);
+        assert!(
+            out.contains("_a #diff-deleted[b]#diff-added[d]_"),
+            "span should be paired: {out}"
+        );
+    }
+
+    #[test]
+    fn test_word_diff_multi_token_replace_pairs_several_spans() {
+        let out = render_diff("A _a b_, *c d*; e.", "A _a x_: *c y*! e.");
+        assert_parses(&out);
+        assert!(out.contains("_a #diff-deleted[b]#diff-added[x]_"), "{out}");
+        assert!(out.contains("*c #diff-deleted[d]#diff-added[y]*"), "{out}");
+    }
+
+    #[test]
+    fn test_word_diff_multi_token_replace_moved_span_is_replaced_whole() {
+        let out = render_diff("A *quick brown* fox.", "A quick *brown* fox.");
+        assert_parses(&out);
+        assert!(out.contains("#diff-deleted[*quick brown*]"), "{out}");
+    }
+
+    #[test]
+    fn test_word_diff_multi_token_replace_mismatched_delimiters() {
+        let out = render_diff("A _a b_, c.", "A *a b*; c.");
+        assert_parses(&out);
+        assert!(out.contains("#diff-deleted[_a b_,]"), "{out}");
+        assert!(out.contains("#diff-added[*a b*;]"), "{out}");
     }
 
     #[test]
