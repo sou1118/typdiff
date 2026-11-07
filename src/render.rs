@@ -238,6 +238,8 @@ fn write_enum_prefix(number: Option<usize>, out: &mut String) {
 /// Escape content so it can safely be placed inside a Typst content block `[...]`.
 ///
 /// - Tracks bracket depth so that balanced `[...]` pairs are left untouched.
+///   Brackets inside equations, raw text and string literals are not counted
+///   (see [`bracket_opaque_ranges`]).
 /// - Unbalanced `]` is escaped as `\]`.
 /// - If the content ends with an odd number of backslashes, a trailing space is
 ///   appended to prevent the closing `]` from being interpreted as `\]`.
@@ -249,13 +251,15 @@ fn write_enum_prefix(number: Option<usize>, out: &mut String) {
 fn escape_content(s: &str, escape_refs: bool) -> String {
     let mut result = String::with_capacity(s.len());
     let mut depth: i32 = 0;
+    let opaque = bracket_opaque_ranges(s);
+    let is_opaque = |i: usize| opaque.iter().any(|r| r.contains(&i));
     for (i, ch) in s.char_indices() {
         match ch {
-            '[' => {
+            '[' if !is_opaque(i) => {
                 depth += 1;
                 result.push(ch);
             }
-            ']' => {
+            ']' if !is_opaque(i) => {
                 if depth > 0 {
                     depth -= 1;
                     result.push(ch);
@@ -287,6 +291,30 @@ fn escape_content(s: &str, escape_refs: bool) -> String {
     result
 }
 
+/// Byte ranges of `s` in which `[` and `]` are not content-block delimiters:
+/// equations (`$(0, 1]$`), raw text and string literals.
+///
+/// The ranges come from the Typst parser, so `\$`, quotes inside math, raw
+/// fences and so on follow Typst's own rules. A node that contains a syntax
+/// error (for example a fragment cut in the middle of an equation) is not
+/// trusted and its brackets are counted as usual.
+fn bracket_opaque_ranges(s: &str) -> Vec<std::ops::Range<usize>> {
+    fn walk(node: &typst_syntax::LinkedNode, out: &mut Vec<std::ops::Range<usize>>) {
+        use typst_syntax::SyntaxKind::{Equation, Raw, Str};
+        if matches!(node.kind(), Equation | Raw | Str) && !node.erroneous() {
+            out.push(node.range());
+            return;
+        }
+        for child in node.children() {
+            walk(&child, out);
+        }
+    }
+    let root = typst_syntax::parse(s);
+    let mut out = Vec::new();
+    walk(&typst_syntax::LinkedNode::new(&root), &mut out);
+    out
+}
+
 /// True when `label_start` points at the `<` in the first argument to `#ref(...)`.
 fn is_ref_label_arg(s: &str, label_start: usize) -> bool {
     // First require a real Typst label literal. Then look left: the first
@@ -315,6 +343,38 @@ mod tests {
     #[test]
     fn test_escape_content_unbalanced_bracket() {
         assert_eq!(escape_content("a ] b", false), "a \\] b");
+    }
+
+    #[test]
+    fn test_escape_content_unpaired_bracket_in_math() {
+        // Issue #62: the `]` of `(0, 1]` must not close the `#emph[`.
+        let s = "Text #emph[a $(0, 1]$ b] end.";
+        assert_eq!(escape_content(s, false), s);
+        let s = "Text #emph[a $[0, 1)$ b] end.";
+        assert_eq!(escape_content(s, false), s);
+        let s = "#emph[a $x \\$ ]$ b] end.";
+        assert_eq!(escape_content(s, false), s);
+        let s = "#emph[a $\"$]\"$ b] end.";
+        assert_eq!(escape_content(s, false), s);
+    }
+
+    #[test]
+    fn test_escape_content_unpaired_bracket_in_raw_and_string() {
+        let s = "#emph[a `x]y` b] end.";
+        assert_eq!(escape_content(s, false), s);
+        let s = "#emph[a ```\n]\n``` b] end.";
+        assert_eq!(escape_content(s, false), s);
+        let s = "#emph[a #f(\"]\") b] end.";
+        assert_eq!(escape_content(s, false), s);
+        let s = "#emph[a #f(\"[\") b] end.";
+        assert_eq!(escape_content(s, false), s);
+    }
+
+    #[test]
+    fn test_escape_content_bracket_outside_math_still_escaped() {
+        assert_eq!(escape_content("$(0, 1]$ b ] c", false), "$(0, 1]$ b \\] c");
+        // An unfinished equation is not trusted: brackets count as before.
+        assert_eq!(escape_content("a $x ] b", false), "a $x \\] b");
     }
 
     #[test]
