@@ -90,7 +90,7 @@ cargo install --git https://github.com/sou1118/typdiff
 ## Usage
 
 ```
-typdiff <OLD> <NEW> [-o <OUTPUT>]
+typdiff <OLD> <NEW> [-o <OUTPUT>] [--no-preamble]
 ```
 
 | Argument | Description |
@@ -98,6 +98,7 @@ typdiff <OLD> <NEW> [-o <OUTPUT>]
 | `<OLD>` | Path to the old Typst file |
 | `<NEW>` | Path to the new Typst file |
 | `-o, --output <OUTPUT>` | Output file path (defaults to stdout) |
+| `--no-preamble` | Omit the definitions of `diff-added` and `diff-deleted`, so the output can import its own |
 
 ### Examples
 
