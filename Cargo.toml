@@ -13,7 +13,7 @@ name = "typdiff"
 path = "src/main.rs"
 
 [dependencies]
-typst-syntax = "0.14"
+typst-syntax = "0.15"
 similar = "3"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
