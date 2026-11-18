@@ -143,6 +143,91 @@ fn test_inline_equation_is_deleted_whole() {
 }
 
 #[test]
+fn test_emphasis_deleted_and_replaced_whole() {
+    // Issue #60: the delimiters used to land in different `#diff-*[...]` blocks.
+    let output = run_diff("A _quick brown_ fox.\n", "A slow red fox.\n");
+    assert!(
+        output.contains("A #diff-deleted[_quick brown_]#diff-added[slow red] fox."),
+        "emphasis should be deleted as one unit: {output}"
+    );
+    assert!(parses(&output), "output must compile: {output}");
+}
+
+#[test]
+fn test_emphasis_added_whole() {
+    let output = run_diff("A quick brown fox.\n", "A _slow red_ fox.\n");
+    assert!(
+        output.contains("A #diff-deleted[quick brown]#diff-added[_slow red_] fox."),
+        "emphasis should be added as one unit: {output}"
+    );
+    assert!(parses(&output), "output must compile: {output}");
+}
+
+#[test]
+fn test_strong_moved_is_replaced_whole() {
+    let output = run_diff("A *quick brown* fox.\n", "A quick *brown* fox.\n");
+    assert!(
+        output.contains("#diff-deleted[*quick brown*]"),
+        "strong should be deleted as one unit: {output}"
+    );
+    assert!(
+        output.contains("#diff-added[quick *brown*]"),
+        "new text should be added as one unit: {output}"
+    );
+    assert!(parses(&output), "output must compile: {output}");
+}
+
+#[test]
+fn test_strong_sentence_removed() {
+    let old =
+        "*Computation by iteratively reweighted least squares.* The MLE has no closed form.\n";
+    let new = "The equations in the score have no closed form.\n";
+    let output = run_diff(old, new);
+    assert!(
+        output.contains("#diff-deleted[*Computation by iteratively reweighted least squares.*"),
+        "strong should be deleted as one unit: {output}"
+    );
+    assert!(parses(&output), "output must compile: {output}");
+}
+
+#[test]
+fn test_emphasis_reworded_to_plain_text() {
+    let old = "Use the _adapted Ribeiro algorithm_ here.\n";
+    let new = "Use the adaptation of the SQV algorithm here.\n";
+    let output = run_diff(old, new);
+    assert!(
+        output.contains("#diff-deleted[_adapted Ribeiro algorithm_]"),
+        "emphasis should be deleted as one unit: {output}"
+    );
+    assert!(parses(&output), "output must compile: {output}");
+}
+
+#[test]
+fn test_kept_emphasis_is_diffed_inside() {
+    let output = run_diff("A _quick brown_ fox.\n", "A _slow brown_ fox.\n");
+    assert!(
+        output.contains("A _#diff-deleted[quick]#diff-added[slow] brown_ fox."),
+        "delimiters should stay outside the marks: {output}"
+    );
+    assert!(parses(&output), "output must compile: {output}");
+}
+
+#[test]
+fn test_kept_emphasis_with_equation_and_reference() {
+    let old = "See _the $x$ value in @fig_1 here_ now.\n";
+    let new = "See _the $y$ value in @fig_1 here_ now.\n";
+    let output = run_diff(old, new);
+    assert!(
+        output.contains("_the #diff-deleted[$x$]#diff-added[$y$] value in @fig_1 here_"),
+        "equation change inside emphasis: {output}"
+    );
+    assert!(parses(&output), "output must compile: {output}");
+
+    let output = run_diff(old, "See the $x$ value now.\n");
+    assert!(parses(&output), "output must compile: {output}");
+}
+
+#[test]
 fn test_markup_reference_paragraph() {
     let old = std::fs::read_to_string("tests/fixtures/markup-ref-start-old.typ").unwrap();
     let new = std::fs::read_to_string("tests/fixtures/markup-ref-start-new.typ").unwrap();

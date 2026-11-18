@@ -489,6 +489,7 @@ dependencies = [
  "pretty_assertions",
  "similar",
  "typst-syntax",
+ "unicode-script",
 ]
 
 [[package]]
