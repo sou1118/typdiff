@@ -18,10 +18,27 @@ pub fn render(results: &[DiffResult]) -> String {
     out.push_str(PREAMBLE);
     out.push('\n');
 
-    for result in results {
+    let mut results = results.iter().peekable();
+    while let Some(result) = results.next() {
         match result {
             DiffResult::Unchanged(block) => {
                 render_block(block, &mut out);
+                out.push('\n');
+            }
+            // A label after the wrapper would label the styled wrapper, which
+            // cannot be referenced. Keep it inside, next to the equation.
+            DiffResult::Added(Block::Equation { content, .. })
+                if results
+                    .peek()
+                    .is_some_and(|next| next_label(next).is_some()) =>
+            {
+                let label = results.next().and_then(next_label).unwrap();
+                write!(
+                    out,
+                    "#diff-added[{} {label}]",
+                    escape_content(content, false)
+                )
+                .unwrap();
                 out.push('\n');
             }
             DiffResult::Added(block) => {
@@ -93,6 +110,19 @@ fn render_block(block: &Block, out: &mut String) {
 /// Returns true if the text consists only of a Typst label `<...>`.
 fn is_label_only(text: &str) -> bool {
     TypstLabel::is_only(text)
+}
+
+/// Returns the label if this result is a label that will be output bare.
+fn next_label(result: &DiffResult) -> Option<&str> {
+    match result {
+        DiffResult::Unchanged(Block::Paragraph { source_text })
+        | DiffResult::Added(Block::Paragraph { source_text })
+            if is_label_only(source_text) =>
+        {
+            Some(source_text.trim())
+        }
+        _ => None,
+    }
 }
 
 /// Render a block wrapped in #diff-added[...] or #diff-deleted[...].
