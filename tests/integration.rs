@@ -143,6 +143,43 @@ fn test_inline_equation_is_deleted_whole() {
 }
 
 #[test]
+fn test_added_block_with_unpaired_bracket_in_math() {
+    // Issue #62: the `]` of the half-open interval used to close `#emph[`.
+    let output = run_diff("First.\n", "First.\n\nText #emph[a $(0, 1]$ b] end.\n");
+    assert!(
+        output.contains("#diff-added[Text #emph[a $(0, 1]$ b] end.]"),
+        "no bracket should be escaped: {output}"
+    );
+    assert!(parses(&output), "output must compile: {output}");
+}
+
+#[test]
+fn test_deleted_block_with_unpaired_bracket_in_math() {
+    let output = run_diff("Text #emph[a $(0, 1]$ b] end.\n", "New.\n");
+    assert!(
+        output.contains("#diff-deleted[Text #emph[a $(0, 1]$ b] end.]"),
+        "no bracket should be escaped: {output}"
+    );
+    assert!(parses(&output), "output must compile: {output}");
+}
+
+#[test]
+fn test_added_block_with_open_bracket_in_math_and_raw() {
+    for src in [
+        "Text #emph[a $[0, 1)$ b] end.\n",
+        "Text #emph[a `x]y` b] end.\n",
+        "Text #emph[a #f(\"]\") b] end.\n",
+    ] {
+        let output = run_diff("First.\n", &format!("First.\n\n{src}"));
+        assert!(
+            output.contains(&format!("#diff-added[{}]", src.trim_end())),
+            "no bracket should be escaped: {output}"
+        );
+        assert!(parses(&output), "output must compile: {output}");
+    }
+}
+
+#[test]
 fn test_markup_reference_paragraph() {
     let old = std::fs::read_to_string("tests/fixtures/markup-ref-start-old.typ").unwrap();
     let new = std::fs::read_to_string("tests/fixtures/markup-ref-start-new.typ").unwrap();
