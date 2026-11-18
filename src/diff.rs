@@ -108,15 +108,25 @@ fn process_replace(old_range: &[Block], new_range: &[Block], results: &mut Vec<D
     }
 
     // 3. Emit results in document order.
-    // First: unmatched old blocks as Deleted.
-    for (oi, old_b) in old_range.iter().enumerate() {
-        if matched_old[oi].is_none() {
-            results.push(DiffResult::Deleted(old_b.clone()));
-        }
-    }
+    // An unmatched old block goes out as Deleted just before the first new
+    // block that follows it: the next one matched to a later old block, or an
+    // added block in between.
+    let deleted_between = |from: usize, to: usize| {
+        (from..to)
+            .filter(|&oi| matched_old[oi].is_none())
+            .map(|oi| DiffResult::Deleted(old_range[oi].clone()))
+    };
+    let mut next_old = 0;
 
-    // Then: new blocks in order — Modified if matched, Added if unmatched.
+    // New blocks in order — Modified if matched, Added if unmatched.
     for (ni, new_b) in new_range.iter().enumerate() {
+        let next_match = matched_new[ni..]
+            .iter()
+            .find_map(|m| *m)
+            .unwrap_or(old_range.len());
+        results.extend(deleted_between(next_old, next_match));
+        next_old = next_old.max(next_match);
+
         if let Some(oi) = matched_new[ni] {
             let old_b = &old_range[oi];
             let old_text = old_b.diff_text().unwrap();
@@ -130,6 +140,7 @@ fn process_replace(old_range: &[Block], new_range: &[Block], results: &mut Vec<D
             results.push(DiffResult::Added(new_b.clone()));
         }
     }
+    results.extend(deleted_between(next_old, old_range.len()));
 }
 
 /// Tokenize text for diffing: ASCII alphanumeric runs form word tokens,
