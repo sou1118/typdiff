@@ -141,6 +141,17 @@ fn render_added_or_deleted(block: &Block, tag: DiffTag, out: &mut String) {
             )
             .unwrap();
         }
+        // A deleted equation must not take a number, or every later number
+        // shifts by one. The set rule is scoped to the wrapper.
+        Block::Equation { content, .. } if tag == DiffTag::Deleted => {
+            write!(
+                out,
+                "#{}[#set math.equation(numbering: none)\n{}]",
+                func,
+                escape_content(content, escape_refs)
+            )
+            .unwrap();
+        }
         // Raw blocks and equations are content-mode; they can be wrapped.
         Block::RawBlock { content } | Block::Equation { content, .. } => {
             write!(out, "#{}[{}]", func, escape_content(content, escape_refs)).unwrap();
