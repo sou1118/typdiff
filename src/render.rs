@@ -244,11 +244,18 @@ fn write_enum_prefix(number: Option<usize>, out: &mut String) {
 /// - When `escape_refs` is true, `@` is escaped as `\@` and `<` is escaped
 ///   as `\<` to suppress reference resolution and label creation (used for
 ///   deleted content where the referenced label may no longer exist or would
-///   create duplicates). Label literals inside `#ref(<label>, ...)` are left
-///   unchanged because they are code arguments rather than content labels.
+///   create duplicates). Label literals in code (`#ref(<label>)`,
+///   `#cite(<key>)`, `#link(<label>)[..]`, at any argument position) are left
+///   unchanged because they are code arguments rather than content labels
+///   (see [`code_label_offsets`]).
 fn escape_content(s: &str, escape_refs: bool) -> String {
     let mut result = String::with_capacity(s.len());
     let mut depth: i32 = 0;
+    let code_labels = if escape_refs {
+        code_label_offsets(s)
+    } else {
+        Vec::new()
+    };
     for (i, ch) in s.char_indices() {
         match ch {
             '[' => {
@@ -269,8 +276,9 @@ fn escape_content(s: &str, escape_refs: bool) -> String {
                 result.push('@');
             }
             // Bare deleted labels are escaped so they do not create anchors.
-            // In `#ref(<label>, ...)`, though, the label is code and must stay bare.
-            '<' if escape_refs && !is_ref_label_arg(s, i) => {
+            // A label literal in code (`#cite(<key>)`, `#ref(<sec>)`) is an
+            // argument, not an anchor, and must stay bare.
+            '<' if escape_refs && !code_labels.contains(&i) => {
                 result.push('\\');
                 result.push('<');
             }
@@ -287,15 +295,28 @@ fn escape_content(s: &str, escape_refs: bool) -> String {
     result
 }
 
-/// True when `label_start` points at the `<` in the first argument to `#ref(...)`.
-fn is_ref_label_arg(s: &str, label_start: usize) -> bool {
-    // First require a real Typst label literal. Then look left: the first
-    // argument is preceded by `(`, and the call before that must be `#ref`.
-    TypstLabel::end(&s[label_start..]).is_some()
-        && s[..label_start]
-            .trim_end()
-            .strip_suffix('(')
-            .is_some_and(|prefix| prefix.trim_end().ends_with("#ref"))
+/// Byte offsets of the label literals in `s` that are code expressions
+/// (`#cite(<key>)`, `#link(<sec>)[..]`, `#let l = <a>`) rather than markup
+/// labels (`text <lbl>`).
+///
+/// Typst parses both as a `Label` node. They differ in the parent: a markup
+/// label sits directly in `Markup` (also inside a content block), a code label
+/// in an argument list, binding or other expression. A label whose text is cut
+/// by a syntax error is not a `Label` node and is treated as markup.
+fn code_label_offsets(s: &str) -> Vec<usize> {
+    fn walk(node: &typst_syntax::LinkedNode, out: &mut Vec<usize>) {
+        use typst_syntax::SyntaxKind::{Label, Markup};
+        if node.kind() == Label && node.parent().is_some_and(|parent| parent.kind() != Markup) {
+            out.push(node.offset());
+        }
+        for child in node.children() {
+            walk(&child, out);
+        }
+    }
+    let root = typst_syntax::parse(s);
+    let mut out = Vec::new();
+    walk(&typst_syntax::LinkedNode::new(&root), &mut out);
+    out
 }
 
 #[cfg(test)]
@@ -348,6 +369,42 @@ mod tests {
             escape_content("compare #ref(<tbl-cobalt-notes>, supplement: [])", true),
             "compare #ref(<tbl-cobalt-notes>, supplement: [])"
         );
+    }
+
+    #[test]
+    fn test_escape_content_code_labels_not_escaped() {
+        // Issue #63: label literals are code arguments at any position.
+        for s in [
+            "#cite(<key>, form: \"prose\")",
+            "#cite(<a>, <b>)",
+            "#link(<sec>)[the section]",
+            "#ref(<sec>, supplement: [x])",
+            "#f(supplement: g(<sec>))",
+            "#f(key: <sec>)",
+            "#f( <sec> )",
+            "#let l = <sec>",
+        ] {
+            assert_eq!(escape_content(s, true), s, "{s}");
+        }
+    }
+
+    #[test]
+    fn test_escape_content_markup_labels_still_escaped() {
+        assert_eq!(
+            escape_content("#cite(<key>) and <lbl> and @lbl", true),
+            "#cite(<key>) and \\<lbl> and \\@lbl"
+        );
+        // Markup inside a content block argument is markup again.
+        assert_eq!(
+            escape_content("#link(<sec>)[see <lbl>]", true),
+            "#link(<sec>)[see \\<lbl>]"
+        );
+        assert_eq!(
+            escape_content("#emph[a <lbl>] <other>", true),
+            "#emph[a \\<lbl>] \\<other>"
+        );
+        // Not a label literal at all.
+        assert_eq!(escape_content("a < b", true), "a \\< b");
     }
 
     #[test]
